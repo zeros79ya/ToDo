@@ -1,9 +1,9 @@
 "use client";
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { Task, Subtask } from '@/lib/types';
-import { updateTask, sortTasksByDate, getAllTags, generateId } from '@/lib/storage';
+import { updateTask, addTask, deleteTask, sortTasksByDate, getAllTags, generateId } from '@/lib/storage';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -31,6 +31,7 @@ interface TaskDetailDialogProps {
     onClose: () => void;
     onTaskChange: () => void;
     onSortByDate?: () => void;
+    isNewTask?: boolean;
 }
 
 export function TaskDetailDialog({
@@ -39,6 +40,7 @@ export function TaskDetailDialog({
     onClose,
     onTaskChange,
     onSortByDate,
+    isNewTask = false,
 }: TaskDetailDialogProps) {
     const [title, setTitle] = useState('');
     const [assignee, setAssignee] = useState('');
@@ -82,16 +84,29 @@ export function TaskDetailDialog({
 
     const handleSave = (shouldSort: boolean = false) => {
         if (task && title.trim()) {
-            updateTask(task.id, {
-                title: title.trim(),
-                assignee: assignee.trim(),
-                resourceUrl: resourceUrl.trim(),
-                notes,
-                dueDate: dueDate ? dueDate.toISOString() : null,
-                dueTime: dueTime || null,
-                tags,
-                subtasks,
-            });
+            if (isNewTask) {
+                // Create new task
+                addTask(task.categoryId, title.trim(), dueDate ? dueDate.toISOString() : null, {
+                    assignee: assignee.trim(),
+                    resourceUrl: resourceUrl.trim(),
+                    notes,
+                    dueTime: dueTime || null,
+                    tags,
+                    subtasks,
+                });
+            } else {
+                // Update existing task
+                updateTask(task.id, {
+                    title: title.trim(),
+                    assignee: assignee.trim(),
+                    resourceUrl: resourceUrl.trim(),
+                    notes,
+                    dueDate: dueDate ? dueDate.toISOString() : null,
+                    dueTime: dueTime || null,
+                    tags,
+                    subtasks,
+                });
+            }
 
             // If due date was changed and Enter was pressed, auto-sort
             if (shouldSort && dueDateChanged && onSortByDate) {
@@ -103,10 +118,71 @@ export function TaskDetailDialog({
         }
     };
 
+    const handlePasteHTML = (e: React.ClipboardEvent) => {
+        // We rely on default browser paste but stop propagation if needed.
+        // Or we can manually insert. Since we are switching to uncontrolled, 
+        // let's try allowing default paste first, as it often handles Excel better than execCommand in modern browsers.
+        // But if styles are stripped, we need to manual insert.
+        // Let's stick to no-op here and let the div handle it, OR use a cleaner insert.
+        // Actually, the user complained about cursor jumping and bad format. 
+        // Uncontrolled component is key. Let's keep a simple handler to ensure cleaner HTML if possible.
+        // For now, let's allow default behavior but in Uncontrolled div.
+        // If we want to force styles, we might need to intercept.
+        // Let's revert to default paste behavior first with uncontrolled component. 
+        // Often execCommand 'insertHTML' is what causes "10 enters" if not handled right.
+    };
+
+    // Editor Refs
+    const smallEditorRef = useRef<HTMLDivElement>(null);
+    const expandedEditorRef = useRef<HTMLDivElement>(null);
+    const initialNotesRef = useRef(notes || '');
+
+    // Set initial content only once or when task changes
+    useEffect(() => {
+        if (smallEditorRef.current && smallEditorRef.current.innerHTML !== notes) {
+            // Only update if significantly different (e.g. task switch), avoid overwriting while typing
+            // For simplicity in this dialog, we assume notes prop updates only on save or load.
+            // But since 'notes' state updates on input, this effect would fire on every keystroke if we depend on 'notes'.
+            // So we should NOT depend on 'notes' for the content update.
+            // We only set content on mount or if task ID changes.
+        }
+    }, []);
+
+    // We need to populate the refs when they mount. 
+    // Since we act as uncontrolled, we use a callback ref or useEffect with dependency.
+    useEffect(() => {
+        if (isOpen && smallEditorRef.current) {
+            if (smallEditorRef.current.innerHTML !== notes) {
+                smallEditorRef.current.innerHTML = notes || '';
+            }
+        }
+    }, [isOpen, task?.id]); // Re-initialize on open or task change
+
+    useEffect(() => {
+        if (isNotesExpanded && expandedEditorRef.current) {
+            expandedEditorRef.current.innerHTML = notes || '';
+            // Focus
+            setTimeout(() => expandedEditorRef.current?.focus(), 50);
+        }
+    }, [isNotesExpanded]);
+
+    // Generate time options (00:00 to 23:30, 30min intervals)
+    const handleDelete = () => {
+        if (task && window.confirm(`"${task.title}"을(를) 삭제하시겠습니까?`)) {
+            deleteTask(task.id);
+            onTaskChange();
+            onClose();
+        }
+    };
+
     const handleKeyDown = (e: React.KeyboardEvent) => {
+        // IME composition check
+        if (e.nativeEvent.isComposing) return;
+
         // Ctrl+Enter: Save from anywhere (including Textarea)
         if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
             e.preventDefault();
+            e.stopPropagation();
             handleSave(true);
             return;
         }
@@ -117,6 +193,7 @@ export function TaskDetailDialog({
             const target = e.target as HTMLElement;
             if (target.tagName !== 'TEXTAREA' && !target.hasAttribute('data-subtask-input')) {
                 e.preventDefault();
+                e.stopPropagation();
                 handleSave(true);
             }
         }
@@ -238,6 +315,7 @@ export function TaskDetailDialog({
                                 placeholder="할 일 제목"
                                 className="mt-1"
                                 tabIndex={1}
+                                onKeyDown={handleKeyDown}
                             />
                         </div>
 
@@ -250,6 +328,7 @@ export function TaskDetailDialog({
                                 placeholder="담당자 이름 또는 부서"
                                 className="mt-1"
                                 tabIndex={2}
+                                onKeyDown={handleKeyDown}
                             />
                         </div>
 
@@ -263,6 +342,7 @@ export function TaskDetailDialog({
                                     placeholder="https://example.com"
                                     className="flex-1"
                                     tabIndex={3}
+                                    onKeyDown={handleKeyDown}
                                 />
                                 {resourceUrl && (
                                     <Button
@@ -530,28 +610,54 @@ export function TaskDetailDialog({
                                     확장
                                 </Button>
                             </div>
-                            <Textarea
-                                value={notes}
-                                onChange={(e) => setNotes(e.target.value)}
-                                placeholder="상세 메모를 입력하세요..."
-                                className="mt-1 w-full min-h-[100px] max-h-[150px] overflow-y-auto overflow-x-hidden resize-y break-all"
-                                style={{
-                                    wordWrap: 'break-word',
-                                    overflowWrap: 'anywhere',
-                                    whiteSpace: 'pre-wrap',
-                                    maxWidth: '100%',
-                                    boxSizing: 'border-box',
-                                    fieldSizing: 'fixed'
-                                } as React.CSSProperties}
-                            />
+                            {/* Rich Text Editor for Notes */}
+                            {/* Rich Text Editor for Notes */}
+                            <div className="mt-1 w-full min-h-[100px] max-h-[150px] overflow-y-auto border border-gray-300 dark:border-gray-600 rounded-md p-2 bg-white dark:bg-gray-800 focus-within:ring-2 focus-within:ring-blue-500 focus-within:border-transparent">
+                                <style jsx global>{`
+                                    .rich-text-editor table { border-collapse: collapse; width: 100%; margin: 0.5em 0; }
+                                    .rich-text-editor td, .rich-text-editor th { border: 1px solid #d1d5db; padding: 4px 8px; vertical-align: top; text-align: left; }
+                                    .dark .rich-text-editor td, .dark .rich-text-editor th { border-color: #4b5563; }
+                                    /* Restore common styles usually reset by Tailwind */
+                                    .rich-text-editor ul { list-style-type: disc; margin-left: 1.5em; }
+                                    .rich-text-editor ol { list-style-type: decimal; margin-left: 1.5em; }
+                                    .rich-text-editor b, .rich-text-editor strong { font-weight: bold; }
+                                    .rich-text-editor i, .rich-text-editor em { font-style: italic; }
+                                    .rich-text-editor u { text-decoration: underline; }
+                                `}</style>
+                                {/* Uncontrolled Editor Div */}
+                                <div
+                                    ref={smallEditorRef}
+                                    contentEditable
+                                    suppressContentEditableWarning
+                                    onInput={(e) => setNotes(e.currentTarget.innerHTML)}
+                                    className="rich-text-editor outline-none w-full h-full text-sm text-gray-900 dark:text-gray-100"
+                                    style={{ whiteSpace: 'pre-wrap' }}
+                                />
+                                {(!notes || notes === '<br>') && (
+                                    <div className="absolute top-2 left-2 text-gray-400 text-sm pointer-events-none">
+                                        상세 메모를 입력하세요...
+                                    </div>
+                                )}
+                            </div>
                         </div>
                     </div>
 
-                    <DialogFooter>
-                        <Button variant="outline" onClick={onClose}>
-                            취소
-                        </Button>
-                        <Button onClick={() => handleSave(dueDateChanged)}>저장</Button>
+                    <DialogFooter className="flex justify-between sm:justify-between">
+                        {!isNewTask ? (
+                            <Button
+                                variant="destructive"
+                                onClick={handleDelete}
+                                className="bg-red-600 hover:bg-red-700"
+                            >
+                                삭제
+                            </Button>
+                        ) : <div />}
+                        <div className="flex gap-2">
+                            <Button variant="outline" onClick={onClose}>
+                                취소
+                            </Button>
+                            <Button onClick={() => handleSave(dueDateChanged)}>저장</Button>
+                        </div>
                     </DialogFooter>
                 </DialogContent>
             </Dialog>
@@ -603,17 +709,24 @@ export function TaskDetailDialog({
                             </div>
                             {/* Content */}
                             <div className="flex-1 p-4 overflow-auto">
-                                <Textarea
-                                    value={notes}
-                                    onChange={(e) => setNotes(e.target.value)}
-                                    placeholder="상세 메모를 입력하세요..."
-                                    className="w-full h-full min-h-[200px] resize-none"
-                                    style={{
-                                        wordWrap: 'break-word',
-                                        overflowWrap: 'break-word',
-                                        fieldSizing: 'fixed'
-                                    } as React.CSSProperties}
-                                />
+                                {/* Expanded Rich Text Editor */}
+                                <div className="w-full h-full min-h-[200px] border border-gray-300 dark:border-gray-600 rounded-md p-4 bg-white dark:bg-gray-800 focus-within:ring-2 focus-within:ring-blue-500 focus-within:border-transparent overflow-hidden flex flex-col">
+                                    <div
+                                        ref={expandedEditorRef}
+                                        contentEditable
+                                        suppressContentEditableWarning
+                                        onInput={(e) => setNotes(e.currentTarget.innerHTML)}
+                                        onKeyDown={(e) => {
+                                            if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+                                                e.preventDefault();
+                                                setIsNotesExpanded(false);
+                                                handleSave(true);
+                                            }
+                                        }}
+                                        className="rich-text-editor outline-none w-full h-full text-base text-gray-900 dark:text-gray-100 overflow-auto"
+                                        style={{ whiteSpace: 'pre-wrap' }}
+                                    />
+                                </div>
                             </div>
                             {/* Footer */}
                             <div className="flex justify-end gap-2 p-4 border-t dark:border-gray-700">

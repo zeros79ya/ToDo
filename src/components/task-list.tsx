@@ -62,7 +62,39 @@ function AnimatedTaskItem({
     const dragControls = useDragControls();
     const [isEditing, setIsEditing] = useState(false);
     const [editTitle, setEditTitle] = useState(task.title);
+
     const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+    const [showCopyToast, setShowCopyToast] = useState(false);
+
+    const handleCopyUrl = (url: string) => {
+        navigator.clipboard.writeText(url);
+        setShowCopyToast(true);
+        setTimeout(() => setShowCopyToast(false), 2000);
+    };
+
+    // Helper function to darken a hex color
+    const darkenColor = (hex: string, amount: number = 0.3): string => {
+        // Remove # if present
+        const color = hex.replace('#', '');
+        const num = parseInt(color, 16);
+        const r = Math.max(0, Math.floor((num >> 16) * (1 - amount)));
+        const g = Math.max(0, Math.floor(((num >> 8) & 0x00FF) * (1 - amount)));
+        const b = Math.max(0, Math.floor((num & 0x0000FF) * (1 - amount)));
+        return `#${(r << 16 | g << 8 | b).toString(16).padStart(6, '0')}`;
+    };
+
+    // Helper function to lighten a hex color (blend with white)
+    const lightenColor = (hex: string, amount: number = 0.4): string => {
+        const color = hex.replace('#', '');
+        const num = parseInt(color, 16);
+        const r = Math.min(255, Math.floor((num >> 16) + (255 - (num >> 16)) * amount));
+        const g = Math.min(255, Math.floor(((num >> 8) & 0x00FF) + (255 - ((num >> 8) & 0x00FF)) * amount));
+        const b = Math.min(255, Math.floor((num & 0x0000FF) + (255 - (num & 0x0000FF)) * amount));
+        return `#${(r << 16 | g << 8 | b).toString(16).padStart(6, '0')}`;
+    };
+
+    const selectionBorderColor = darkenColor(categoryColor, 0.25);
+    const normalBorderColor = lightenColor(categoryColor, 0.4);
 
     const handleToggle = () => {
         toggleTaskComplete(task.id);
@@ -144,10 +176,11 @@ function AnimatedTaskItem({
                         : task.isPinned
                             ? 'bg-yellow-50 dark:bg-yellow-900/30'
                             : 'bg-white dark:bg-gray-800'
-                    } ${isSelected ? 'ring-2 ring-blue-500 border-blue-300 dark:border-blue-600' : 'border-gray-100 dark:border-gray-700'}`}
+                    } ${isSelected ? 'border-y-0' : 'border-y-0'}`}
                 style={{
                     position: 'relative',
-                    borderLeft: `4px solid ${categoryColor}`,
+                    borderLeft: isSelected ? `4px solid ${selectionBorderColor}` : `4px solid ${normalBorderColor}`,
+                    borderRight: isSelected ? `4px solid ${selectionBorderColor}` : `4px solid ${normalBorderColor}`,
                 }}
                 onDoubleClick={() => onOpenDetail(task)}
                 onClick={onClick}
@@ -218,7 +251,10 @@ function AnimatedTaskItem({
                                 className="flex items-center justify-center text-purple-500 cursor-pointer hover:text-purple-700 p-1.5 -m-1.5 rounded hover:bg-purple-50 transition-all hover:scale-125"
                                 onClick={(e) => {
                                     e.stopPropagation();
-                                    window.open(task.resourceUrl, '_blank');
+                                    handleCopyUrl(task.resourceUrl!);
+                                    if (!e.ctrlKey && !e.metaKey) {
+                                        window.open(task.resourceUrl, '_blank');
+                                    }
                                 }}
                                 title={task.resourceUrl}
                             >
@@ -239,7 +275,13 @@ function AnimatedTaskItem({
                                     </div>
                                 </TooltipTrigger>
                                 <TooltipContent side="top" className="max-w-[250px] bg-gray-800 text-white border-gray-700">
-                                    <p className="whitespace-pre-wrap text-sm">{task.notes.length > 100 ? task.notes.slice(0, 100) + '...' : task.notes}</p>
+                                    <div className="text-xs text-gray-400 mb-1">메모 미리보기</div>
+                                    <div
+                                        className="whitespace-pre-wrap text-sm line-clamp-4"
+                                        dangerouslySetInnerHTML={{
+                                            __html: task.notes.length > 200 ? task.notes.slice(0, 200) + '...' : task.notes
+                                        }}
+                                    />
                                 </TooltipContent>
                             </Tooltip>
                         )}
@@ -348,6 +390,13 @@ function AnimatedTaskItem({
                     </DialogFooter>
                 </DialogContent>
             </Dialog>
+
+            {/* Copy Toast for TaskItem */}
+            {showCopyToast && (
+                <div className="fixed top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 bg-gray-800 text-white px-4 py-2 rounded-lg shadow-lg z-50 animate-in fade-in zoom-in duration-200 pointer-events-none">
+                    링크가 복사되었습니다
+                </div>
+            )}
         </>
     );
 }
@@ -383,6 +432,22 @@ export function TaskList({ category, categories, tasks, onTasksChange }: TaskLis
     const [deletedTaskBackup, setDeletedTaskBackup] = useState<Task | null>(null);
     const [showUndoToast, setShowUndoToast] = useState(false);
     const undoTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+    // Custom paste handler - rely on default for now as we switched to uncontrolled
+    const handlePasteHTML = (e: React.ClipboardEvent) => {
+        // e.preventDefault();
+        // Default browser paste often handles Excel tables better than insertHTML
+    };
+
+    // Editor Ref
+    const notesEditorRef = useRef<HTMLDivElement>(null);
+
+    // Initialize content when modal opens (component mounts due to AnimatePresence)
+    useEffect(() => {
+        if (notesTask && notesEditorRef.current) {
+            notesEditorRef.current.innerHTML = notesTask.notes || '';
+        }
+    }, [notesTask?.id]); // Initialize on task ID change (or mount)
 
 
 
@@ -1282,18 +1347,35 @@ export function TaskList({ category, categories, tasks, onTasksChange }: TaskLis
                             </div>
                             {/* Content */}
                             <div className="flex-1 p-4 overflow-auto">
-                                <Textarea
-                                    value={notesTask?.notes || ''}
-                                    onChange={(e) => {
-                                        if (notesTask) {
-                                            updateTask(notesTask.id, { notes: e.target.value });
-                                            setNotesTask({ ...notesTask, notes: e.target.value });
-                                        }
-                                    }}
-                                    placeholder="메모를 입력하세요..."
-                                    className="w-full h-full min-h-[200px] resize-none"
-                                    style={{ wordWrap: 'break-word', overflowWrap: 'break-word' }}
-                                />
+                                <style jsx global>{`
+                                    .rich-text-editor table { border-collapse: collapse; width: 100%; margin: 0.5em 0; }
+                                    .rich-text-editor td, .rich-text-editor th { border: 1px solid #d1d5db; padding: 4px 8px; vertical-align: top; text-align: left; }
+                                    .dark .rich-text-editor td, .dark .rich-text-editor th { border-color: #4b5563; }
+                                    /* Restore common styles usually reset by Tailwind */
+                                    .rich-text-editor ul { list-style-type: disc; margin-left: 1.5em; }
+                                    .rich-text-editor ol { list-style-type: decimal; margin-left: 1.5em; }
+                                    .rich-text-editor b, .rich-text-editor strong { font-weight: bold; }
+                                    .rich-text-editor i, .rich-text-editor em { font-style: italic; }
+                                    .rich-text-editor u { text-decoration: underline; }
+                                `}</style>
+                                {/* Rich Text Editor */}
+                                <div className="w-full h-full min-h-[200px] border border-gray-300 dark:border-gray-600 rounded-md p-4 bg-white dark:bg-gray-800 focus-within:ring-2 focus-within:ring-blue-500 focus-within:border-transparent overflow-hidden flex flex-col">
+                                    <div
+                                        ref={notesEditorRef}
+                                        contentEditable
+                                        suppressContentEditableWarning
+                                        onInput={(e) => {
+                                            if (notesTask) {
+                                                const newNotes = e.currentTarget.innerHTML;
+                                                setNotesTask({ ...notesTask, notes: newNotes });
+                                                // Debounce update or update on blur recommended, but direct update for now to match behavior
+                                                updateTask(notesTask.id, { notes: newNotes });
+                                            }
+                                        }}
+                                        className="rich-text-editor outline-none w-full h-full text-base text-gray-900 dark:text-gray-100 overflow-auto"
+                                        style={{ whiteSpace: 'pre-wrap' }}
+                                    />
+                                </div>
                             </div>
                             {/* Footer */}
                             <div className="flex justify-end gap-2 p-4 border-t dark:border-gray-700">

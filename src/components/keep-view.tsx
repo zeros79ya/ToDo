@@ -40,6 +40,7 @@ export function KeepView({ selectedNoteId, onNoteSelected, onNotesChange }: Keep
     const [editingNote, setEditingNote] = useState<Note | null>(null);
     const [searchQuery, setSearchQuery] = useState('');
     const [showArchived, setShowArchived] = useState(false);
+    const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
 
     // Label Manager State
     const [isLabelManagerOpen, setIsLabelManagerOpen] = useState(false);
@@ -49,6 +50,8 @@ export function KeepView({ selectedNoteId, onNoteSelected, onNotesChange }: Keep
 
     const inputRef = useRef<HTMLInputElement>(null);
     const searchInputRef = useRef<HTMLInputElement>(null);
+    const newNoteEditorRef = useRef<HTMLDivElement>(null);
+    const editNoteEditorRef = useRef<HTMLDivElement>(null);
 
     useEffect(() => {
         loadNotes();
@@ -70,17 +73,32 @@ export function KeepView({ selectedNoteId, onNoteSelected, onNotesChange }: Keep
         }
     }, [selectedNoteId, notes, onNoteSelected]);
 
-    // Focus title input when isAdding becomes true
+    // Focus title input when isAdding becomes true and init editor
     useEffect(() => {
-        if (isAdding && inputRef.current) {
-            // Use setTimeout to ensure the input is rendered first
+        if ((isAdding || isCreateDialogOpen) && inputRef.current) {
             setTimeout(() => {
                 inputRef.current?.focus();
             }, 50);
-        } else if (!isAdding) {
+            if (newNoteEditorRef.current) {
+                newNoteEditorRef.current.innerHTML = newContent || '';
+            }
+        } else if (!isAdding && !isCreateDialogOpen) {
             setNewNoteLabels([]); // Reset labels when closing add form
         }
-    }, [isAdding]);
+    }, [isAdding, isCreateDialogOpen]);
+
+    // Init Edit Editor
+    useEffect(() => {
+        if (editingNote) {
+            // Wait for dialog animation and DOM mount
+            // Ref is null initially because Dialog renders conditionally
+            setTimeout(() => {
+                if (editNoteEditorRef.current) {
+                    editNoteEditorRef.current.innerHTML = editingNote.content || '';
+                }
+            }, 100);
+        }
+    }, [editingNote?.id]); // update when editing note changes
 
     // Keyboard shortcuts: Ctrl+N to add new note, Ctrl+/ to search
     useEffect(() => {
@@ -125,6 +143,7 @@ export function KeepView({ selectedNoteId, onNoteSelected, onNotesChange }: Keep
             setNewContent('');
             setNewNoteLabels([]);
             setIsAdding(false);
+            setIsCreateDialogOpen(false);
             loadNotes();
             onNotesChange?.();
         }
@@ -260,6 +279,22 @@ export function KeepView({ selectedNoteId, onNoteSelected, onNotesChange }: Keep
 
     return (
         <div className="flex flex-col h-full bg-gray-50 dark:bg-gray-900">
+            <style jsx global>{`
+                .rich-edit-content table { border-collapse: collapse; width: 100%; margin: 0.5em 0; }
+                .rich-edit-content td, .rich-edit-content th { border: 1px solid #d1d5db; padding: 4px 8px; vertical-align: top; text-align: left; }
+                .dark .rich-edit-content td, .dark .rich-edit-content th { border-color: #4b5563; }
+                .rich-edit-content ul { list-style-type: disc; margin-left: 1.5em; }
+                .rich-edit-content ol { list-style-type: decimal; margin-left: 1.5em; }
+                .rich-edit-content b, .rich-edit-content strong { font-weight: bold; }
+                .rich-edit-content i, .rich-edit-content em { font-style: italic; }
+                .rich-edit-content u { text-decoration: underline; }
+                
+                /* Card view styles - truncated but structured */
+                .note-card-content table { border-collapse: collapse; width: 100%; margin: 2px 0; font-size: 0.9em; }
+                .note-card-content td, .note-card-content th { border: 1px solid #e5e7eb; padding: 2px 4px; }
+                .dark .note-card-content td, .dark .note-card-content th { border-color: #4b5563; }
+                .note-card-content ul { list-style-type: disc; margin-left: 1.2em; }
+            `}</style>
             {/* Header */}
             <div className="p-4 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 flex-shrink-0">
                 <div className="flex items-center justify-between mb-3">
@@ -356,13 +391,20 @@ export function KeepView({ selectedNoteId, onNoteSelected, onNotesChange }: Keep
                                     autoFocus
                                     tabIndex={1}
                                 />
-                                <Textarea
-                                    value={newContent}
-                                    onChange={(e) => setNewContent(e.target.value)}
-                                    placeholder="메모 작성... (Ctrl+Enter로 저장)"
-                                    className="border-0 p-0 text-sm resize-none min-h-[60px] focus-visible:ring-0"
+                                <div
+                                    ref={newNoteEditorRef}
+                                    contentEditable
+                                    suppressContentEditableWarning
+                                    onInput={(e) => setNewContent(e.currentTarget.innerHTML)}
+                                    className="rich-edit-content border-0 p-1 text-sm resize-none min-h-[60px] focus-visible:ring-0 outline-none max-h-[300px] overflow-y-auto"
                                     tabIndex={2}
+                                    style={{ whiteSpace: 'pre-wrap' }}
                                 />
+                                {(!newContent || newContent === '<br>') && (
+                                    <div className="absolute top-[44px] left-3 text-gray-400 text-sm pointer-events-none">
+                                        메모 작성... (Ctrl+Enter로 저장)
+                                    </div>
+                                )}
                                 {/* Label Selection in Add Form */}
                                 {labels.length > 0 && (
                                     <div className="flex flex-wrap gap-1 mt-2">
@@ -438,7 +480,15 @@ export function KeepView({ selectedNoteId, onNoteSelected, onNotesChange }: Keep
             </div>
 
             {/* Notes Grid */}
-            <div className="flex-1 overflow-y-auto p-4">
+            <div
+                className="flex-1 overflow-y-auto p-4"
+                onDoubleClick={(e) => {
+                    // Prevent if clicking on card (handled by propagation stop, but just in case)
+                    if (e.target === e.currentTarget) {
+                        setIsCreateDialogOpen(true);
+                    }
+                }}
+            >
                 {/* Pinned Section */}
                 {pinnedNotes.length > 0 && (
                     <div className="mb-4">
@@ -491,7 +541,11 @@ export function KeepView({ selectedNoteId, onNoteSelected, onNotesChange }: Keep
 
                 {/* Empty State */}
                 {filteredNotes.length === 0 && (
-                    <div className="flex flex-col items-center justify-center h-full text-gray-400">
+                    <div
+                        className="flex flex-col items-center justify-center h-full text-gray-400 cursor-pointer hover:text-gray-500 transition-colors"
+                        onDoubleClick={() => setIsCreateDialogOpen(true)}
+                        title="더블 클릭하여 메모 추가"
+                    >
                         {labels.length > 0 && selectedLabelId ? (
                             <>
                                 <Tag className="w-12 h-12 mb-2 opacity-20" />
@@ -509,9 +563,81 @@ export function KeepView({ selectedNoteId, onNoteSelected, onNotesChange }: Keep
                 )}
             </div>
 
+
+
+            {/* Create Note Dialog (Double Click) */}
+            <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
+                <DialogContent className="sm:max-w-3xl" onKeyDown={handleAddFormKeyDown}>
+                    <DialogHeader>
+                        <DialogTitle>새 메모 작성 (Ctrl+Enter로 저장)</DialogTitle>
+                    </DialogHeader>
+                    <div className="space-y-3">
+                        <Input
+                            ref={inputRef}
+                            value={newTitle}
+                            onChange={(e) => setNewTitle(e.target.value)}
+                            placeholder="제목"
+                            className="font-medium"
+                            autoFocus
+                        />
+                        <div
+                            ref={newNoteEditorRef}
+                            contentEditable
+                            suppressContentEditableWarning
+                            onInput={(e) => setNewContent(e.currentTarget.innerHTML)}
+                            className="rich-edit-content min-h-[400px] p-2 border rounded-md focus-within:ring-2 focus-within:ring-blue-500 outline-none max-h-[65vh] overflow-y-auto"
+                            style={{ whiteSpace: 'pre-wrap' }}
+                        />
+                        {/* Label Selection in Create Dialog */}
+                        {labels.length > 0 && (
+                            <div className="flex flex-wrap gap-1">
+                                {newNoteLabels.map(labelId => {
+                                    const label = labels.find(l => l.id === labelId);
+                                    if (!label) return null;
+                                    return (
+                                        <span key={labelId} className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                                            {label.name}
+                                            <button onClick={() => toggleLabelOnNote(labelId)} className="ml-1 text-blue-600 hover:text-blue-800">
+                                                <X className="w-3 h-3" />
+                                            </button>
+                                        </span>
+                                    );
+                                })}
+                                <Popover>
+                                    <PopoverTrigger asChild>
+                                        <Button variant="ghost" size="sm" className="h-6 px-2 text-xs text-gray-500 rounded-full border border-dashed border-gray-300">
+                                            <Plus className="w-3 h-3 mr-1" /> 라벨
+                                        </Button>
+                                    </PopoverTrigger>
+                                    <PopoverContent className="w-48 p-2" align="start">
+                                        <div className="space-y-1">
+                                            <p className="text-xs font-medium text-gray-500 mb-2 px-1">라벨 선택</p>
+                                            {labels.map(label => (
+                                                <div
+                                                    key={label.id}
+                                                    className={`flex items-center px-2 py-1.5 rounded-md text-sm cursor-pointer hover:bg-gray-100 ${newNoteLabels.includes(label.id) ? 'bg-blue-50 text-blue-700' : ''}`}
+                                                    onClick={() => toggleLabelOnNote(label.id)}
+                                                >
+                                                    <Tag className="w-3.5 h-3.5 mr-2" />
+                                                    {label.name}
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </PopoverContent>
+                                </Popover>
+                            </div>
+                        )}
+                        <DialogFooter>
+                            <Button variant="outline" onClick={() => setIsCreateDialogOpen(false)}>취소</Button>
+                            <Button onClick={handleAddNote}>저장</Button>
+                        </DialogFooter>
+                    </div>
+                </DialogContent>
+            </Dialog>
+
             {/* Edit Dialog */}
             <Dialog open={!!editingNote} onOpenChange={(open) => !open && handleUpdateNote()}>
-                <DialogContent className="sm:max-w-md" onKeyDown={handleEditDialogKeyDown}>
+                <DialogContent className="sm:max-w-3xl" onKeyDown={handleEditDialogKeyDown}>
                     <DialogHeader>
                         <DialogTitle>메모 수정 (Ctrl+Enter로 저장)</DialogTitle>
                     </DialogHeader>
@@ -523,11 +649,13 @@ export function KeepView({ selectedNoteId, onNoteSelected, onNotesChange }: Keep
                                 placeholder="제목"
                                 className="font-medium"
                             />
-                            <Textarea
-                                value={editingNote.content}
-                                onChange={(e) => setEditingNote({ ...editingNote, content: e.target.value })}
-                                placeholder="메모 내용..."
-                                className="min-h-[150px]"
+                            <div
+                                ref={editNoteEditorRef}
+                                contentEditable
+                                suppressContentEditableWarning
+                                onInput={(e) => setEditingNote({ ...editingNote, content: e.currentTarget.innerHTML })}
+                                className="rich-edit-content min-h-[400px] p-2 border rounded-md focus-within:ring-2 focus-within:ring-blue-500 outline-none max-h-[65vh] overflow-y-auto"
+                                style={{ whiteSpace: 'pre-wrap' }}
                             />
                             {/* Label Selection in Edit Dialog */}
                             {labels.length > 0 && (
@@ -665,7 +793,7 @@ export function KeepView({ selectedNoteId, onNoteSelected, onNotesChange }: Keep
                     </div>
                 </DialogContent>
             </Dialog>
-        </div>
+        </div >
     );
 }
 
@@ -698,6 +826,7 @@ function NoteCard({
             className="group relative rounded-lg border shadow-sm hover:shadow-md transition-shadow cursor-pointer overflow-hidden flex flex-col"
             style={{ backgroundColor: note.color }}
             onClick={onEdit}
+            onDoubleClick={(e) => e.stopPropagation()}
         >
             {/* Content */}
             <div className="p-3 flex-1">
@@ -707,9 +836,13 @@ function NoteCard({
                     </h4>
                 )}
                 {note.content && (
-                    <p className="text-xs text-gray-600 line-clamp-4 whitespace-pre-wrap">
-                        {note.content}
-                    </p>
+                    <div
+                        className="note-card-content text-xs text-gray-600 dark:text-gray-400 line-clamp-4 relative"
+                        style={{ whiteSpace: 'pre-wrap', maxHeight: '6rem', overflow: 'hidden' }}
+                    >
+                        {/* We use a mask for fade out effect at bottom if needed, but line-clamp handles it mostly */}
+                        <div dangerouslySetInnerHTML={{ __html: note.content }} />
+                    </div>
                 )}
 
                 {/* Labels Chips */}

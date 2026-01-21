@@ -77,7 +77,15 @@ export function Sidebar({
     const [newCategoryName, setNewCategoryName] = useState('');
     const [selectedColor, setSelectedColor] = useState(CATEGORY_COLORS[0].value);
     const [editingCategory, setEditingCategory] = useState<Category | null>(null);
+
     const [categoryToDelete, setCategoryToDelete] = useState<Category | null>(null);
+    const [showCopyToast, setShowCopyToast] = useState(false);
+
+    const handleCopyUrl = (url: string) => {
+        navigator.clipboard.writeText(url);
+        setShowCopyToast(true);
+        setTimeout(() => setShowCopyToast(false), 2000);
+    };
 
     // Collapsible sections
     const [isCalendarExpanded, setIsCalendarExpanded] = useState(() => {
@@ -428,7 +436,12 @@ export function Sidebar({
                                                 variant="ghost"
                                                 size="sm"
                                                 className="h-7 w-7 p-0 text-blue-500 hover:text-blue-700 hover:bg-blue-100 hover:scale-110 transition-all duration-150 cursor-pointer"
-                                                onClick={() => window.open(link.url, '_blank')}
+                                                onClick={(e) => {
+                                                    handleCopyUrl(link.url);
+                                                    if (!e.ctrlKey && !e.metaKey) {
+                                                        window.open(link.url, '_blank');
+                                                    }
+                                                }}
                                                 title="열기"
                                             >
                                                 <ExternalLink className="h-4 w-4" />
@@ -752,6 +765,13 @@ export function Sidebar({
                     </DialogFooter>
                 </DialogContent>
             </Dialog >
+
+            {/* Copy Toast */}
+            {showCopyToast && (
+                <div className="fixed top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 bg-gray-800 text-white px-4 py-2 rounded-lg shadow-lg z-50 animate-in fade-in zoom-in duration-200 pointer-events-none">
+                    링크가 복사되었습니다
+                </div>
+            )}
         </div >
     );
 }

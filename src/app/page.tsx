@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Category, Task } from '@/lib/types';
-import { getCategories, getTasks, addTask, getTheme, setTheme, Theme, getLayoutState, saveLayoutState, getLayoutPreset, saveLayoutPreset, Layout, LayoutState } from '@/lib/storage';
+import { getCategories, getTasks, addTask, getTheme, setTheme, Theme, getLayoutState, saveLayoutState, getLayoutPreset, saveLayoutPreset, Layout, LayoutState, generateId, addCategory } from '@/lib/storage';
 import { Sidebar } from '@/components/sidebar';
 import { TaskList } from '@/components/task-list';
 import { CalendarView } from '@/components/calendar-view';
@@ -45,17 +45,32 @@ export default function Home() {
 
   // Load tasks for selected categories (multiple)
   const loadTasks = useCallback(() => {
-    if (selectedCategoryIds.length > 0) {
-      const allTasks = selectedCategoryIds.flatMap(id => getTasks(id));
+    const teamScheduleCat = categories.find(c => c.name === '팀 일정');
+    let targetIds = [...selectedCategoryIds];
+
+    // Always include 'Team Schedule' for Calendar view visibility
+    if (teamScheduleCat && !targetIds.includes(teamScheduleCat.id)) {
+      targetIds.push(teamScheduleCat.id);
+    }
+
+    if (targetIds.length > 0) {
+      const allTasks = targetIds.flatMap(id => getTasks(id));
       setTasks(allTasks);
     } else {
       setTasks([]);
     }
-  }, [selectedCategoryIds]);
+  }, [selectedCategoryIds, categories]);
 
   // Initial load
   useEffect(() => {
-    const cats = loadCategories();
+    let cats = loadCategories();
+
+    // Ensure 'Team Schedule' category exists
+    if (!cats.find(c => c.name === '팀 일정')) {
+      addCategory('팀 일정');
+      cats = loadCategories();
+    }
+
     if (cats.length > 0 && selectedCategoryIds.length === 0) {
       const defaultIds = [cats[0].id];
       const teamSchedule = cats.find(c => c.name === '팀 일정');
@@ -253,10 +268,30 @@ export default function Home() {
         setSelectedCategoryIds(prev => [...prev, targetCategoryId]);
       }
 
-      // Pass dueDate directly to addTask so auto-sort works correctly
-      const newTask = addTask(targetCategoryId, '새 할일', date.toISOString());
-      loadTasks();
-      setDetailTask({ ...newTask, dueDate: date.toISOString() });
+      // Ensure the target category is visible
+      if (!selectedCategoryIds.includes(targetCategoryId)) {
+        setSelectedCategoryIds(prev => [...prev, targetCategoryId]);
+      }
+
+      // Create a temporary task object (not saved to storage yet)
+      const tempTask: Task = {
+        id: generateId(), // Temporary ID
+        categoryId: targetCategoryId,
+        title: '',
+        assignee: '',
+        resourceUrl: '',
+        notes: '',
+        dueDate: date.toISOString(),
+        dueTime: null,
+        tags: [],
+        completed: false,
+        completedAt: null,
+        isPinned: false,
+        order: -1,
+        createdAt: new Date().toISOString()
+      };
+
+      setDetailTask(tempTask);
     }
   };
 
@@ -476,6 +511,7 @@ export default function Home() {
                 onTaskDrop={handleTaskDrop}
                 onTaskCopy={handleTaskCopy}
                 onTaskDelete={handleTasksChange}
+                onDataChange={handleTasksChange}
               />
             ) : (
               <KeepView
@@ -507,6 +543,7 @@ export default function Home() {
         isOpen={!!detailTask}
         onClose={() => setDetailTask(null)}
         onTaskChange={handleTasksChange}
+        isNewTask={detailTask ? !tasks.find(t => t.id === detailTask.id) : false}
       />
 
       <ImportExportDialog

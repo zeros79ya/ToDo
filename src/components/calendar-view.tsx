@@ -23,8 +23,10 @@ import {
 } from 'date-fns';
 import { ko } from 'date-fns/locale';
 import { Task, Category } from '@/lib/types';
-import { ChevronLeft, ChevronRight, GripVertical, Trash2 } from 'lucide-react';
+import { ChevronLeft, ChevronRight, GripVertical, Trash2, Paperclip, Plus, Search } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { TeamScheduleAddModal } from './team-schedule-add-modal';
+import { TeamScheduleSearchModal } from './team-schedule-search-modal';
 
 interface CalendarViewProps {
     tasks: Task[];
@@ -39,6 +41,7 @@ interface CalendarViewProps {
     onTaskDrop: (taskId: string, newDate: Date) => void;
     onTaskCopy: (taskId: string, newDate: Date) => void;
     onTaskDelete: () => void;
+    onDataChange?: () => void;
 }
 
 export function CalendarView({
@@ -53,12 +56,80 @@ export function CalendarView({
     onMonthChange,
     onTaskDrop,
     onTaskCopy,
-    onTaskDelete
+    onTaskDelete,
+    onDataChange
 }: CalendarViewProps) {
     const [draggedTaskId, setDraggedTaskId] = useState<string | null>(null);
     const [dropTargetDate, setDropTargetDate] = useState<Date | null>(null);
     const [deleteTaskToConfirm, setDeleteTaskToConfirm] = useState<Task | null>(null);
     const [currentTime, setCurrentTime] = useState(new Date());
+
+    // Team schedule add modal state
+    const [isTeamScheduleModalOpen, setIsTeamScheduleModalOpen] = useState(false);
+    const [teamScheduleModalDate, setTeamScheduleModalDate] = useState<Date | undefined>(undefined);
+    const [editingScheduleTask, setEditingScheduleTask] = useState<Task | null>(null);
+    const [showOnlyTeamSchedule, setShowOnlyTeamSchedule] = useState(false);
+    const [showCopyToast, setShowCopyToast] = useState(false);
+    const [isSearchModalOpen, setIsSearchModalOpen] = useState(false);
+
+    const handleCopyUrl = (url: string) => {
+        navigator.clipboard.writeText(url);
+        setShowCopyToast(true);
+        setTimeout(() => setShowCopyToast(false), 2000);
+    };
+
+    // Get Team Schedule Category ID
+    const teamScheduleCategoryId = categories.find(c => c.name === '팀 일정')?.id || '';
+
+    // Item height percentage (20% - 60%, default 35%)
+    const [itemHeightPercent, setItemHeightPercent] = useState(35);
+    const [isHeightInitialized, setIsHeightInitialized] = useState(false);
+
+    // Load item height from localStorage
+    useEffect(() => {
+        const saved = localStorage.getItem('calendar-item-height');
+        if (saved) {
+            const parsed = parseInt(saved, 10);
+            if (!isNaN(parsed) && parsed >= 20 && parsed <= 60) {
+                setItemHeightPercent(parsed);
+            }
+        }
+        setIsHeightInitialized(true);
+    }, []);
+
+    // Save item height to localStorage (only after initialization)
+    useEffect(() => {
+        if (isHeightInitialized) {
+            localStorage.setItem('calendar-item-height', itemHeightPercent.toString());
+        }
+    }, [itemHeightPercent, isHeightInitialized]);
+
+    // Keyboard shortcut: Ctrl+Shift+Arrow to adjust item height
+    useEffect(() => {
+        const handleKeyDown = (e: KeyboardEvent) => {
+            if (e.ctrlKey && e.shiftKey) {
+                if (e.key === 'ArrowUp') {
+                    e.preventDefault();
+                    setItemHeightPercent(prev => Math.min(60, prev + 5));
+                } else if (e.key === 'ArrowDown') {
+                    e.preventDefault();
+                    setItemHeightPercent(prev => Math.max(20, prev - 5));
+                }
+            }
+
+            // Search shortcut: Ctrl + /
+            if ((e.ctrlKey || e.metaKey) && e.key === '/') {
+                e.preventDefault();
+                setIsSearchModalOpen(true);
+            }
+        };
+
+        window.addEventListener('keydown', handleKeyDown);
+        return () => window.removeEventListener('keydown', handleKeyDown);
+    }, []);
+
+    // Calculate actual height in pixels (base: 18px at 35%)
+    const itemHeight = Math.round(18 * (itemHeightPercent / 35));
 
     // Smart Update: Set timeout for the next significant event (Meeting Start or Meeting End)
     useEffect(() => {
@@ -262,6 +333,15 @@ export function CalendarView({
                     >
                         {showWeekends ? '토/일 보기' : '토/일 숨기기'}
                     </button>
+                    <button
+                        onClick={() => setShowOnlyTeamSchedule(!showOnlyTeamSchedule)}
+                        className={`px-3 py-1 text-sm font-medium rounded transition-colors ${showOnlyTeamSchedule
+                            ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300 ring-2 ring-purple-500 ring-opacity-50'
+                            : 'bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400'
+                            }`}
+                    >
+                        {showOnlyTeamSchedule ? '이전 보기' : '팀 일정'}
+                    </button>
                 </div>
 
                 <div className="flex items-center gap-4">
@@ -283,7 +363,17 @@ export function CalendarView({
                 </div>
 
                 {/* Empty div for layout balance */}
-                <div className="w-[140px]"></div>
+                {/* Search Button (Right Aligned) */}
+                <div className="w-[140px] flex justify-end">
+                    <button
+                        onClick={() => setIsSearchModalOpen(true)}
+                        className="px-3 py-1 text-sm font-medium rounded transition-colors bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700 flex items-center gap-1"
+                        title="팀 일정 검색 (Ctrl+/)"
+                    >
+                        <Search className="w-4 h-4" />
+                        검색
+                    </button>
+                </div>
             </div>
         );
     };
@@ -312,16 +402,34 @@ export function CalendarView({
         );
     };
 
-    const [expandedWeeks, setExpandedWeeks] = useState<Set<number>>(new Set());
-
-    const toggleWeekExpansion = (weekNum: number) => {
-        const newExpanded = new Set(expandedWeeks);
-        if (newExpanded.has(weekNum)) {
-            newExpanded.delete(weekNum);
-        } else {
-            newExpanded.add(weekNum);
+    // Collapsed weeks state with localStorage persistence
+    const [collapsedWeeks, setCollapsedWeeks] = useState<Set<number>>(() => {
+        if (typeof window !== 'undefined') {
+            const saved = localStorage.getItem('calendar-collapsed-weeks');
+            if (saved) {
+                try {
+                    return new Set(JSON.parse(saved));
+                } catch {
+                    return new Set();
+                }
+            }
         }
-        setExpandedWeeks(newExpanded);
+        return new Set();
+    });
+
+    // Save collapsedWeeks to localStorage when it changes
+    useEffect(() => {
+        localStorage.setItem('calendar-collapsed-weeks', JSON.stringify([...collapsedWeeks]));
+    }, [collapsedWeeks]);
+
+    const toggleWeekCollapse = (weekNum: number) => {
+        const newCollapsed = new Set(collapsedWeeks);
+        if (newCollapsed.has(weekNum)) {
+            newCollapsed.delete(weekNum);
+        } else {
+            newCollapsed.add(weekNum);
+        }
+        setCollapsedWeeks(newCollapsed);
     };
 
     // ... (existing code)
@@ -351,25 +459,27 @@ export function CalendarView({
                     const firstDayOfWeek = weekDays[0];
                     const weekNum = getWeekNumber(firstDayOfWeek);
                     const isWeekPast = isPastWeek(firstDayOfWeek);
-                    const isExpanded = expandedWeeks.has(weekNum);
+                    const isCollapsed = collapsedWeeks.has(weekNum);
 
                     return (
                         <div
                             key={`week-${weekIndex}`}
-                            className={`grid shrink-0 ${showWeekends ? 'grid-cols-[32px_minmax(0,0.5fr)_repeat(5,minmax(0,1fr))_minmax(0,0.5fr)]' : 'grid-cols-[32px_repeat(5,minmax(0,1fr))]'}`}
+                            className={`grid shrink-0 ${showWeekends
+                                ? 'grid-cols-[32px_minmax(0,0.5fr)_repeat(5,minmax(0,1fr))_minmax(0,0.5fr)]'
+                                : 'grid-cols-[32px_repeat(5,minmax(0,1fr))]'}`}
                         >
-                            {/* Week Number Cell with Checkbox */}
-                            <div className="border-b border-r border-gray-200 dark:border-gray-700 flex flex-col items-center pt-2 bg-gray-50 dark:bg-gray-900/50 gap-1">
+                            {/* Week Number Cell with Collapse Checkbox */}
+                            <div className={`border-b border-r border-gray-200 dark:border-gray-700 flex flex-col items-center justify-center bg-gray-50 dark:bg-gray-900/50 ${isCollapsed ? 'h-8' : 'pt-1 gap-0.5'}`}>
                                 <span className="text-xs font-medium text-gray-400 dark:text-gray-600">
                                     W{weekNum.toString().padStart(2, '0')}
                                 </span>
                                 {isWeekPast && (
                                     <input
                                         type="checkbox"
-                                        checked={isExpanded}
-                                        onChange={() => toggleWeekExpansion(weekNum)}
-                                        className="w-3 h-3 cursor-pointer"
-                                        title="팀 일정 보기"
+                                        checked={isCollapsed}
+                                        onChange={() => toggleWeekCollapse(weekNum)}
+                                        className="w-3 h-3 cursor-pointer accent-gray-500"
+                                        title="주차 접기/펼치기"
                                     />
                                 )}
                             </div>
@@ -379,19 +489,41 @@ export function CalendarView({
                                 const dayOfWeek = day.getDay(); // 0=Sun, 6=Sat
                                 if (!showWeekends && (dayOfWeek === 0 || dayOfWeek === 6)) return null;
 
-                                const dayTasks = getTasksForDate(day);
                                 const isCurrentMonth = isSameMonth(day, currentMonth);
                                 const isDropTarget = dropTargetDate && isSameDay(day, dropTargetDate);
+
+                                // If week is collapsed, show minimal cell with date only
+                                if (isCollapsed) {
+                                    return (
+                                        <div
+                                            key={day.toISOString()}
+                                            className={`h-8 border-b border-r border-gray-200 dark:border-gray-700 px-1 flex items-center bg-gray-100/50 dark:bg-gray-800/50 ${!isCurrentMonth ? 'opacity-50' : ''}`}
+                                        >
+                                            <span className={`text-xs ${!isCurrentMonth ? 'text-gray-300 dark:text-gray-600' :
+                                                dayOfWeek === 0 ? 'text-red-400' :
+                                                    dayOfWeek === 6 ? 'text-blue-400' : 'text-gray-500 dark:text-gray-400'
+                                                }`}>
+                                                {format(day, 'd')}
+                                            </span>
+                                        </div>
+                                    );
+                                }
+
+                                const dayTasks = getTasksForDate(day);
 
                                 // Split tasks into Schedule and Regular
                                 const scheduleCategory = categories.find(c => c.name === '팀 일정');
 
-                                // REFINED: Show schedule tasks if not past week OR if explicitly expanded
-                                const scheduleTasks = (!isWeekPast || isExpanded)
-                                    ? dayTasks.filter(t => t.categoryId === scheduleCategory?.id)
+                                // Show all tasks if week is not collapsed
+                                const scheduleTasks = !isCollapsed
+                                    ? dayTasks
+                                        .filter(t => t.categoryId === scheduleCategory?.id)
+                                        .sort((a, b) => (a.dueTime || '99:99').localeCompare(b.dueTime || '99:99'))
                                     : [];
 
-                                const regularTasks = dayTasks.filter(t => t.categoryId !== scheduleCategory?.id);
+                                const regularTasks = (showOnlyTeamSchedule || isCollapsed)
+                                    ? []
+                                    : dayTasks.filter(t => t.categoryId !== scheduleCategory?.id);
 
                                 // Regular tasks display logic
 
@@ -402,7 +534,15 @@ export function CalendarView({
                                         className={`min-h-[60px] border-b border-r border-gray-200 dark:border-gray-700 p-1 transition-colors ${!isCurrentMonth ? 'bg-gray-50/50 dark:bg-gray-900' : 'bg-white dark:bg-gray-800'
                                             } ${isToday(day) ? 'bg-blue-50/30 dark:bg-blue-900/10' : ''} ${isDropTarget ? 'bg-blue-100 dark:bg-blue-800/50 ring-2 ring-blue-400 ring-inset' : ''
                                             } hover:bg-gray-50 dark:hover:bg-gray-800/50`}
-                                        onClick={() => onDateClick?.(day)}
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            if (e.ctrlKey || e.metaKey) {
+                                                setTeamScheduleModalDate(day);
+                                                setIsTeamScheduleModalOpen(true);
+                                            } else {
+                                                onDateClick?.(day);
+                                            }
+                                        }}
                                         onDragOver={(e) => handleDragOver(e, day)}
                                         onDragLeave={handleDragLeave}
                                         onDrop={(e) => handleDrop(e, day)}
@@ -421,29 +561,51 @@ export function CalendarView({
                                             {(isWeekPast ? scheduleTasks.slice(0, 3) : scheduleTasks).map((task) => {
                                                 const isActive = isMeetingActive(task);
                                                 const highlightLevel = task.highlightLevel || 0;
+
+                                                // Border Color: Prioritize highlight level logic, fallback to yellow if active but no highlight
+                                                const borderColor = highlightLevel === 1 ? 'border-red-500' :
+                                                    highlightLevel === 2 ? 'border-green-500' :
+                                                        highlightLevel === 3 ? 'border-purple-500' :
+                                                            isActive ? 'border-yellow-500 dark:border-yellow-300' : 'border-transparent';
+
+                                                // Background & Text: Active takes precedence
+                                                const styleClasses = isActive
+                                                    ? 'bg-yellow-200 text-yellow-900 dark:bg-yellow-600 dark:text-yellow-50 font-bold'
+                                                    : highlightLevel > 0
+                                                        ? 'bg-gray-100 dark:bg-gray-800 text-gray-900 dark:text-gray-100'
+                                                        : 'bg-transparent text-gray-900 dark:text-gray-100 hover:bg-gray-100 dark:hover:bg-gray-800';
+
                                                 return (
                                                     <div
                                                         key={task.id}
-                                                        className={`flex items-center text-xs px-1 py-0.5 font-medium rounded cursor-pointer transition-colors w-full group/schedule border-l-[3px] ${isActive
-                                                            ? 'bg-yellow-200 text-yellow-900 border-yellow-500 dark:bg-yellow-600 dark:text-yellow-50 dark:border-yellow-300 font-bold'
-                                                            : highlightLevel > 0
-                                                                ? `bg-gray-100 dark:bg-gray-800 ${highlightLevel === 1 ? 'border-blue-500 text-gray-900 dark:text-gray-100' :
-                                                                    highlightLevel === 2 ? 'border-green-500 text-gray-900 dark:text-gray-100' :
-                                                                        'border-purple-500 text-gray-900 dark:text-gray-100'
-                                                                }`
-                                                                : 'bg-transparent border-transparent text-gray-900 dark:text-gray-100 hover:bg-gray-100 dark:hover:bg-gray-800'
-                                                            }`}
+                                                        className={`flex items-center text-xs px-1 font-medium rounded cursor-pointer transition-colors w-full group/schedule border-l-[3px] ${borderColor} ${styleClasses}`}
+                                                        style={{ height: `${itemHeight}px` }}
                                                         onClick={(e) => {
                                                             e.stopPropagation();
-                                                            onTaskClick(task);
+                                                            setEditingScheduleTask(task);
+                                                            setIsTeamScheduleModalOpen(true);
                                                         }}
                                                         title={`${task.title}${task.dueTime ? ` (${task.dueTime})` : ''} ${isActive ? '[진행 중]' : ''}`}
                                                     >
-                                                        <div className="truncate w-full min-w-0 flex items-center">
+                                                        <div className="truncate w-full min-w-0 flex items-center gap-1">
                                                             {task.dueTime ? <span className="mr-1 opacity-75 whitespace-nowrap">{task.dueTime.match(/(\d{2}:\d{2})/)?.[0] || task.dueTime}</span> : ''}
                                                             <span className="truncate">{task.title}</span>
-                                                            {highlightLevel === 1 && <div className="w-2 h-2 rounded-full ml-auto shrink-0 bg-blue-500" />}
-                                                            {highlightLevel === 2 && <div className="w-2 h-2 rounded-full ml-auto shrink-0 bg-green-500" />}
+                                                            <div className="ml-auto shrink-0 flex items-center gap-0.5">
+                                                                {task.resourceUrl && (
+                                                                    <Paperclip
+                                                                        className="w-3 h-3 text-purple-500 cursor-pointer hover:text-purple-700"
+                                                                        onClick={(e) => {
+                                                                            e.stopPropagation();
+                                                                            handleCopyUrl(task.resourceUrl!);
+                                                                            if (!e.ctrlKey && !e.metaKey) {
+                                                                                window.open(task.resourceUrl, '_blank');
+                                                                            }
+                                                                        }}
+                                                                    />
+                                                                )}
+                                                                {highlightLevel === 1 && <div className="w-2 h-2 rounded-full bg-red-500" />}
+                                                                {highlightLevel === 2 && <div className="w-2 h-2 rounded-full bg-green-500" />}
+                                                            </div>
                                                         </div>
                                                     </div>
                                                 );
@@ -472,22 +634,30 @@ export function CalendarView({
                                                         draggable
                                                         onDragStart={(e) => handleDragStart(e, task.id)}
                                                         onDragEnd={() => setDraggedTaskId(null)}
-                                                        className={`group/task relative text-xs px-1.5 py-1 rounded cursor-grab active:cursor-grabbing transition-all w-full overflow-hidden ${draggedTaskId === task.id ? 'opacity-50 scale-95' : ''
+                                                        className={`group/task relative text-xs px-1.5 rounded cursor-grab active:cursor-grabbing transition-all w-full overflow-hidden flex items-center ${draggedTaskId === task.id ? 'opacity-50 scale-95' : ''
                                                             } ${task.completed ? 'bg-gray-100 dark:bg-gray-800 text-gray-400 dark:text-gray-500 line-through' : 'dark:!bg-gray-700 dark:!text-gray-300'}`}
                                                         style={task.completed ? {
+                                                            height: `${itemHeight}px`,
                                                             borderLeft: '3px solid #d1d5db',
                                                         } : isOverdue ? {
+                                                            height: `${itemHeight}px`,
                                                             backgroundColor: '#fee2e2',
                                                             color: '#b91c1c',
                                                             borderLeft: '3px solid #ef4444',
                                                         } : {
+                                                            height: `${itemHeight}px`,
                                                             backgroundColor: `${taskColor}15`,
                                                             color: taskColor,
                                                             borderLeft: `3px solid ${taskColor}`,
                                                         }}
                                                         onClick={(e) => {
                                                             e.stopPropagation();
-                                                            onTaskClick(task);
+                                                            if (task.categoryId === teamScheduleCategoryId) {
+                                                                setEditingScheduleTask(task);
+                                                                setIsTeamScheduleModalOpen(true);
+                                                            } else {
+                                                                onTaskClick(task);
+                                                            }
                                                         }}
                                                         title={`${task.title}${task.dueTime ? ` (${task.dueTime})` : ''}`}
                                                     >
@@ -496,15 +666,21 @@ export function CalendarView({
                                                                 {task.dueTime && <span className="opacity-60 mr-1 whitespace-nowrap">{task.dueTime}</span>}
                                                                 <span className="truncate">{task.title}</span>
                                                             </div>
-                                                            <button
-                                                                className="opacity-0 group-hover/task:opacity-100 ml-1 p-0.5 rounded hover:bg-red-100 transition-opacity flex-shrink-0"
-                                                                onClick={(e) => {
-                                                                    e.stopPropagation();
-                                                                    setDeleteTaskToConfirm(task);
-                                                                }}
-                                                            >
-                                                                <Trash2 className="w-3 h-3 text-red-500" />
-                                                            </button>
+                                                            {task.resourceUrl && (
+                                                                <button
+                                                                    className="ml-1 p-1 rounded hover:bg-purple-100 dark:hover:bg-purple-900/30 flex-shrink-0"
+                                                                    onClick={(e) => {
+                                                                        e.stopPropagation();
+                                                                        handleCopyUrl(task.resourceUrl!);
+                                                                        if (!e.ctrlKey && !e.metaKey) {
+                                                                            window.open(task.resourceUrl, '_blank');
+                                                                        }
+                                                                    }}
+                                                                    title="자료 열기"
+                                                                >
+                                                                    <Paperclip className="w-3 h-3 text-purple-500" />
+                                                                </button>
+                                                            )}
                                                         </div>
                                                     </div>
                                                 );
@@ -531,6 +707,22 @@ export function CalendarView({
             {renderHeader()}
             {renderDays()}
             {renderCells()}
+
+            <TeamScheduleAddModal
+                isOpen={isTeamScheduleModalOpen}
+                onClose={() => {
+                    setIsTeamScheduleModalOpen(false);
+                    setEditingScheduleTask(null);
+                }}
+                onScheduleAdded={() => {
+                    if (onDataChange) onDataChange();
+                    else if (onTaskDelete) onTaskDelete();
+                    setEditingScheduleTask(null);
+                }}
+                initialDate={teamScheduleModalDate}
+                teamScheduleCategoryId={teamScheduleCategoryId}
+                existingTask={editingScheduleTask}
+            />
 
             {/* Delete Confirmation Overlay */}
             <AnimatePresence>
@@ -571,6 +763,18 @@ export function CalendarView({
                     </motion.div>
                 )}
             </AnimatePresence>
+
+            {/* Team Schedule Search Modal */}
+            <TeamScheduleSearchModal
+                isOpen={isSearchModalOpen}
+                onClose={() => setIsSearchModalOpen(false)}
+                tasks={tasks}
+                teamScheduleCategoryId={teamScheduleCategoryId}
+                onNavigateToDate={(date) => {
+                    onMonthChange(date);
+                    setIsSearchModalOpen(false);
+                }}
+            />
         </div>
     );
 }
