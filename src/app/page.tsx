@@ -11,6 +11,7 @@ import { FavoritesView } from '@/components/favorites-view';
 import { TaskDetailDialog } from '@/components/task-detail-dialog';
 import { ImportExportDialog } from '@/components/import-export-dialog';
 import { ScheduleImportDialog } from '@/components/schedule-import-dialog';
+import { TeamScheduleAddModal } from '@/components/team-schedule-add-modal';
 import { ParsedSchedule, parseScheduleText } from '@/lib/schedule-parser';
 import { Button } from '@/components/ui/button';
 import { PanelLeftClose, PanelLeft, Sun, Moon } from 'lucide-react';
@@ -35,6 +36,8 @@ export default function Home() {
   const [viewMode, setViewMode] = useState<'calendar' | 'keep' | 'favorites'>('calendar');
   const [selectedNoteId, setSelectedNoteId] = useState<string | null>(null);
   const [notesVersion, setNotesVersion] = useState(0);
+  const [isTeamScheduleModalOpen, setIsTeamScheduleModalOpen] = useState(false);
+  const [editingScheduleTask, setEditingScheduleTask] = useState<Task | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
   // Load categories from LocalStorage
@@ -107,10 +110,23 @@ export default function Home() {
         setLayoutState(newLayout);
         saveLayoutState({ layout: newLayout });
       }
-      // Ctrl + Left/Right Arrow : Toggle between Calendar and Keep
+      // Ctrl + Left/Right Arrow : Cycle through Calendar -> Keep -> Favorites
       if ((e.ctrlKey || e.metaKey) && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
         e.preventDefault();
-        setViewMode(prev => prev === 'calendar' ? 'keep' : 'calendar');
+        setViewMode(prev => {
+          if (e.key === 'ArrowRight') {
+            // Calendar -> Favorites -> Keep -> Calendar
+            if (prev === 'calendar') return 'favorites';
+            if (prev === 'favorites') return 'keep';
+            return 'calendar';
+          } else {
+            // ArrowLeft (Reverse)
+            // Calendar <- Favorites <- Keep <- Calendar
+            if (prev === 'calendar') return 'keep';
+            if (prev === 'keep') return 'favorites';
+            return 'calendar';
+          }
+        });
       }
 
       // Layout Presets: Ctrl+6~0 (load), Ctrl+Shift+6~0 (save)
@@ -562,6 +578,10 @@ export default function Home() {
                   setSelectedNoteId(noteId);
                 }}
                 onDataChange={handleTasksChange}
+                onScheduleClick={(task) => {
+                  setEditingScheduleTask(task);
+                  setIsTeamScheduleModalOpen(true);
+                }}
               />
             )}
           </div>
@@ -602,6 +622,18 @@ export default function Home() {
         onImport={handleScheduleImport}
         currentYear={currentMonth.getFullYear()}
         currentMonth={currentMonth.getMonth()} // 0-indexed
+      />
+
+      <TeamScheduleAddModal
+        isOpen={isTeamScheduleModalOpen}
+        onClose={() => {
+          setIsTeamScheduleModalOpen(false);
+          setEditingScheduleTask(null);
+        }}
+        onScheduleAdded={handleTasksChange}
+        initialDate={new Date()} // Not used for edit
+        teamScheduleCategoryId={categories.find(c => c.name === '팀 일정')?.id || ''}
+        existingTask={editingScheduleTask}
       />
     </div>
   );

@@ -336,7 +336,7 @@ export function CalendarView({
                             : 'bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400'
                             }`}
                     >
-                        {showWeekends ? '토/일 보기' : '토/일 숨기기'}
+                        {showWeekends ? '일요일 숨기기' : '일요일 보기'}
                     </button>
                     <button
                         onClick={() => setShowOnlyTeamSchedule(!showOnlyTeamSchedule)}
@@ -405,12 +405,12 @@ export function CalendarView({
         // Changed order to start with Sunday
         const days = ['일', '월', '화', '수', '목', '금', '토'];
         return (
-            <div className={`grid ${showWeekends ? 'grid-cols-[32px_minmax(0,0.5fr)_repeat(5,minmax(0,1fr))_minmax(0,0.5fr)]' : 'grid-cols-[32px_repeat(5,minmax(0,1fr))]'} border-b border-gray-200 dark:border-gray-700`}>
+            <div className={`grid ${showWeekends ? 'grid-cols-[32px_minmax(0,0.5fr)_repeat(6,minmax(0,1fr))]' : 'grid-cols-[32px_repeat(6,minmax(0,1fr))]'} border-b border-gray-200 dark:border-gray-700`}>
                 <div className="w-8 border-r border-gray-200 dark:border-gray-700"></div> {/* Week number column header */}
                 {days.map((day, i) => {
                     // i=0 (Sun), i=6 (Sat)
-                    // If weekends hidden, hide Sun(0) and Sat(6)
-                    if (!showWeekends && (i === 0 || i === 6)) return null;
+                    // If weekends hidden (now "Sunday Hidden"), hide Sun(0). Show Sat(6).
+                    if (!showWeekends && i === 0) return null;
                     return (
                         <div
                             key={day}
@@ -488,23 +488,21 @@ export function CalendarView({
                         <div
                             key={`week-${weekIndex}`}
                             className={`grid shrink-0 ${showWeekends
-                                ? 'grid-cols-[32px_minmax(0,0.5fr)_repeat(5,minmax(0,1fr))_minmax(0,0.5fr)]'
-                                : 'grid-cols-[32px_repeat(5,minmax(0,1fr))]'}`}
+                                ? 'grid-cols-[32px_minmax(0,0.5fr)_repeat(6,minmax(0,1fr))]'
+                                : 'grid-cols-[32px_repeat(6,minmax(0,1fr))]'}`}
                         >
                             {/* Week Number Cell with Collapse Checkbox */}
                             <div className={`border-b border-r border-gray-200 dark:border-gray-700 flex flex-col items-center justify-center bg-gray-50 dark:bg-gray-900/50 ${isCollapsed ? 'h-8' : 'pt-1 gap-0.5'}`}>
                                 <span className="text-xs font-medium text-gray-400 dark:text-gray-600">
                                     W{weekNum.toString().padStart(2, '0')}
                                 </span>
-                                {isWeekPast && (
-                                    <input
-                                        type="checkbox"
-                                        checked={isCollapsed}
-                                        onChange={() => toggleWeekCollapse(weekNum)}
-                                        className="w-3 h-3 cursor-pointer accent-gray-500"
-                                        title="주차 접기/펼치기"
-                                    />
-                                )}
+                                <input
+                                    type="checkbox"
+                                    checked={isCollapsed}
+                                    onChange={() => toggleWeekCollapse(weekNum)}
+                                    className="w-3 h-3 cursor-pointer accent-gray-500"
+                                    title="주차 접기/펼치기"
+                                />
                             </div>
 
                             {/* Day Cells */}
@@ -622,34 +620,116 @@ export function CalendarView({
                                                 // Border Logic:
                                                 // - All Schedules: 3px left border
                                                 // - Active: Yellow
-                                                // - Others (Executive & Team): Unified Bright Gray
+                                                // - Executive (Level 1-3): Custom settings
+                                                // - Others: Gray
 
                                                 const isActive = isMeetingActive(task);
                                                 const highlightLevel = task.highlightLevel || 0;
+                                                const isExecutive = highlightLevel > 0;
+
+                                                // Determine base color for executive
+                                                let execColorKey = 'gray';
+                                                if (isExecutive && settings.executiveColors) {
+                                                    execColorKey = settings.executiveColors[highlightLevel as 1 | 2 | 3] || 'gray';
+                                                }
+
+                                                // Helper to get Tailwind classes or raw colors
+                                                const getColorValue = (colorKey: string, type: 'border' | 'bg' | 'text', lightness?: number) => {
+                                                    // Standard Tailwind map for 'border-KEY-500' equivalent approx colors
+                                                    const colorMap: Record<string, string> = {
+                                                        gray: '220, 13%', // HSL base
+                                                        red: '0, 84%',
+                                                        green: '142, 71%',
+                                                        blue: '217, 91%',
+                                                        purple: '262, 83%',
+                                                        orange: '24, 95%',
+                                                        yellow: '48, 96%',
+                                                    };
+
+                                                    const hslBase = colorMap[colorKey] || colorMap['gray'];
+
+                                                    // If lightness is provided, use it. Otherwise default based on type
+                                                    let l = 50;
+                                                    if (lightness !== undefined) {
+                                                        l = lightness;
+                                                    } else {
+                                                        if (type === 'bg') l = 96;
+                                                        if (type === 'border') l = 75;
+                                                        if (type === 'text') l = 30;
+                                                    }
+
+                                                    return `hsl(${hslBase}, ${l}%)`;
+                                                };
 
                                                 const leftBorderClass = 'border-l-[3px]';
 
-                                                const leftBorderColor = isActive
-                                                    ? 'border-l-yellow-500 dark:border-l-yellow-300'
-                                                    : 'border-l-gray-300 dark:border-l-gray-600'; // Unified for ALL schedules
+                                                let leftBorderColorStyle: React.CSSProperties = {};
+
+                                                if (isActive) {
+                                                    // Active is always Yellow-ish
+                                                    leftBorderColorStyle = { borderLeftColor: '#eab308' }; // yellow-500
+                                                } else if (isExecutive) {
+                                                    // Executive Custom Border
+                                                    // Use Executive Border Lightness setting (common for all levels)
+                                                    // 0(dark) -> 100(light). We map direct value.
+                                                    leftBorderColorStyle = {
+                                                        borderLeftColor: getColorValue(execColorKey, 'border', settings.executiveBorderLightness)
+                                                    };
+                                                } else {
+                                                    // Normal Team Schedule -> Gray
+                                                    // Use standard Settings Border Darkness or fixed? 
+                                                    // User request implied "Bright Gray(Default)" for non-selected.
+                                                    // Let's use the 'executiveBorderLightness' for consistency if it's the requested "Common" slider,
+                                                    // OR fallback to standard gray. Original code was 'gray-300' (light).
+                                                    // User said "1) Border Color: Bright Gray(Default)... Brightness can be adjusted".
+                                                    // This implies 'gray' choice also uses the slider.
+                                                    leftBorderColorStyle = {
+                                                        borderLeftColor: getColorValue('gray', 'border', settings.executiveBorderLightness ?? 80)
+                                                    };
+                                                }
+
 
                                                 // Completed Task Visibility
                                                 if (task.completed && settings.completedMode === 'hidden') return null;
 
-                                                // Background & Text: Active takes precedence, otherwise use gray background for all schedules
-                                                // Dynamic BG color from settings (Light mode only logic for now, Dark mode falls back to gray-800)
-                                                const bgColorStyle = isActive
-                                                    ? {} // Active uses class
-                                                    : { backgroundColor: `hsl(220, 13%, ${settings.bgLightness}%)` };
+                                                // Background Logic
+                                                let bgColorStyle = {};
+
+                                                if (isActive) {
+                                                    // Active uses class (yellow bg)
+                                                    // We'll leave bgColorStyle empty and let 'styleClasses' handle it via tailwind classes,
+                                                    // OR override here. Existing code used classes.
+                                                } else {
+                                                    if (isExecutive && settings.executiveBgMode === 'color') {
+                                                        // Use Level Color for BG
+                                                        bgColorStyle = { backgroundColor: getColorValue(execColorKey, 'bg', settings.executiveBgLightness) };
+                                                    } else {
+                                                        // Gray Mode (Unified)
+                                                        // Applies to both Executive (if gray mode) AND Regular Team Schedules
+                                                        // Use `executiveBgLightness` or standard `bgLightness`? 
+                                                        // User req: "3) Background Color... Bright Gray (Default) same as Team Leader (Regular)".
+                                                        // If 'color' selected, differentiate.
+                                                        // So: If 'gray' mode, use Unified Gray.
+                                                        // We'll use `executiveBgLightness` for executives/team schedules if that's what the slider controls.
+                                                        // Or maybe `bgLightness` (General)? The request asked for "Background color... brightness control separately".
+                                                        // Let's use `executiveBgLightness` for schedule items.
+                                                        bgColorStyle = { backgroundColor: getColorValue('gray', 'bg', settings.executiveBgLightness ?? 96) };
+                                                    }
+                                                }
 
                                                 const styleClasses = isActive
                                                     ? 'bg-yellow-200 text-yellow-900 dark:bg-yellow-600 dark:text-yellow-50 font-bold'
                                                     : 'text-gray-900 dark:text-gray-100 hover:brightness-95 dark:hover:bg-gray-700';
 
-                                                // Border Color from settings
-                                                const borderColorStyle = settings.showBorder
-                                                    ? { borderColor: `hsl(220, 13%, ${100 - settings.borderDarkness}%)` }
-                                                    : { borderColor: 'transparent' };
+                                                // Box Border Color (Top/Right/Bottom)
+                                                // Linked to Left Border Color logic generally, but User said "Divider Border (9 o'clock) follows Border Color".
+                                                // So we use the same color logic.
+                                                const boxBorderColor = isActive
+                                                    ? '#eab308'
+                                                    : (isExecutive
+                                                        ? getColorValue(execColorKey, 'border', settings.executiveBorderLightness)
+                                                        : getColorValue('gray', 'border', settings.executiveBorderLightness ?? 80)
+                                                    );
 
                                                 // Completed Style
                                                 const completedClass = task.completed && settings.completedMode === 'dimmed' ? 'opacity-50' :
@@ -658,16 +738,15 @@ export function CalendarView({
                                                 return (
                                                     <div
                                                         key={task.id}
-                                                        className={`flex items-center px-1 font-medium rounded cursor-pointer transition-colors w-full group/schedule border dark:border-gray-500 ${leftBorderClass} ${leftBorderColor} ${styleClasses} ${completedClass}`}
+                                                        className={`flex items-center px-1 font-medium rounded cursor-pointer transition-colors w-full group/schedule border dark:border-gray-500 ${leftBorderClass} ${styleClasses} ${completedClass}`}
                                                         style={{
                                                             height: `${itemHeight}px`,
                                                             fontSize: `${settings.fontSize}px`,
-                                                            ...bgColorStyle, // Apply dynamic BG
-                                                            // We set borders individually to avoid overriding the left border color (which indicates status)
-                                                            borderTopColor: settings.showBorder ? `hsl(220, 13%, ${100 - settings.borderDarkness}%)` : 'transparent',
-                                                            borderRightColor: settings.showBorder ? `hsl(220, 13%, ${100 - settings.borderDarkness}%)` : 'transparent',
-                                                            borderBottomColor: settings.showBorder ? `hsl(220, 13%, ${100 - settings.borderDarkness}%)` : 'transparent',
-                                                            // Removed borderLeftWidth: '3px' to let className control width (1px default, 3px for Active)
+                                                            ...bgColorStyle,
+                                                            ...leftBorderColorStyle,
+                                                            borderTopColor: settings.showBorder ? boxBorderColor : 'transparent',
+                                                            borderRightColor: settings.showBorder ? boxBorderColor : 'transparent',
+                                                            borderBottomColor: settings.showBorder ? boxBorderColor : 'transparent',
                                                         }}
                                                         onClick={(e) => {
                                                             e.stopPropagation();
@@ -692,9 +771,9 @@ export function CalendarView({
                                                                         }}
                                                                     />
                                                                 )}
-                                                                {highlightLevel === 1 && <div className="w-2 h-2 rounded-full bg-red-500" />}
-                                                                {highlightLevel === 2 && <div className="w-2 h-2 rounded-full bg-green-500" />}
-                                                                {highlightLevel === 3 && <div className="w-2 h-2 rounded-full bg-purple-500" />}
+                                                                {(settings.showExecutiveIndicator ?? true) && highlightLevel === 1 && <div className="w-2 h-2 rounded-full" style={{ backgroundColor: getColorValue(settings.executiveColors?.[1] || 'gray', 'bg', 50) }} />}
+                                                                {(settings.showExecutiveIndicator ?? true) && highlightLevel === 2 && <div className="w-2 h-2 rounded-full" style={{ backgroundColor: getColorValue(settings.executiveColors?.[2] || 'gray', 'bg', 50) }} />}
+                                                                {(settings.showExecutiveIndicator ?? true) && highlightLevel === 3 && <div className="w-2 h-2 rounded-full" style={{ backgroundColor: getColorValue(settings.executiveColors?.[3] || 'gray', 'bg', 50) }} />}
                                                             </div>
                                                         </div>
                                                     </div>

@@ -306,38 +306,6 @@ export function Sidebar({
     return (
         <div className="w-72 h-screen bg-white dark:bg-gray-900 border-r border-gray-200 dark:border-gray-700 flex flex-col overflow-hidden transition-colors duration-300">
             {/* View Mode Tabs */}
-            <div className="p-2 grid grid-cols-3 gap-1 border-b border-gray-100 dark:border-gray-800 shrink-0">
-                <button
-                    onClick={() => onViewModeChange('calendar')}
-                    className={`flex items-center justify-center py-2 rounded-md text-sm font-medium transition-colors ${viewMode === 'calendar'
-                        ? 'bg-blue-50 text-blue-600 dark:bg-blue-900/20 dark:text-blue-400'
-                        : 'text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-800'
-                        }`}
-                >
-                    <CheckSquare className="w-4 h-4 mr-1.5" />
-                    할 일
-                </button>
-                <button
-                    onClick={() => onViewModeChange('keep')}
-                    className={`flex items-center justify-center py-2 rounded-md text-sm font-medium transition-colors ${viewMode === 'keep'
-                        ? 'bg-yellow-50 text-yellow-600 dark:bg-yellow-900/20 dark:text-yellow-400'
-                        : 'text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-800'
-                        }`}
-                >
-                    <FileText className="w-4 h-4 mr-1.5" />
-                    메모
-                </button>
-                <button
-                    onClick={() => onViewModeChange('favorites')}
-                    className={`flex items-center justify-center py-2 rounded-md text-sm font-medium transition-colors ${viewMode === 'favorites'
-                        ? 'bg-purple-50 text-purple-600 dark:bg-purple-900/20 dark:text-purple-400'
-                        : 'text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-800'
-                        }`}
-                >
-                    <Star className="w-4 h-4 mr-1.5" />
-                    즐겨찾기
-                </button>
-            </div>
             {/* Header */}
             <div className="p-3 border-b border-gray-200 dark:border-gray-700 flex-shrink-0">
                 <div className="flex items-center gap-2 text-blue-600 dark:text-blue-400 mb-2">

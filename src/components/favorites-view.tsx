@@ -12,13 +12,15 @@ interface FavoritesViewProps {
     categories: Category[];
     onTaskClick?: (task: Task) => void;
     onNoteClick?: (noteId: string) => void;
+    onScheduleClick?: (task: Task) => void;
     onDataChange?: () => void;
 }
 
-export function FavoritesView({ categories, onTaskClick, onNoteClick, onDataChange }: FavoritesViewProps) {
+export function FavoritesView({ categories, onTaskClick, onNoteClick, onScheduleClick, onDataChange }: FavoritesViewProps) {
     const [favoriteTasks, setFavoriteTasks] = useState<Task[]>([]);
     const [favoriteLinks, setFavoriteLinks] = useState<QuickLink[]>([]);
     const [favoriteNotes, setFavoriteNotes] = useState<Note[]>([]);
+    const [showCopyToast, setShowCopyToast] = useState(false);
 
     const loadFavorites = () => {
         setFavoriteTasks(getTasks().filter(t => t.isFavorite));
@@ -29,6 +31,12 @@ export function FavoritesView({ categories, onTaskClick, onNoteClick, onDataChan
     useEffect(() => {
         loadFavorites();
     }, []);
+
+    const handleCopyUrl = (url: string) => {
+        navigator.clipboard.writeText(url);
+        setShowCopyToast(true);
+        setTimeout(() => setShowCopyToast(false), 2000);
+    };
 
     const handleToggleFavorite = (type: 'task' | 'link' | 'note', id: string) => {
         if (type === 'task') {
@@ -94,7 +102,7 @@ export function FavoritesView({ categories, onTaskClick, onNoteClick, onDataChan
                                 <div
                                     key={task.id}
                                     className="flex items-center gap-3 p-3 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 hover:shadow-md transition-shadow cursor-pointer"
-                                    onClick={() => onTaskClick?.(task)}
+                                    onClick={() => onScheduleClick ? onScheduleClick(task) : onTaskClick?.(task)}
                                 >
                                     <div className="flex-1 min-w-0">
                                         <div className="flex items-center gap-2">
@@ -109,7 +117,18 @@ export function FavoritesView({ categories, onTaskClick, onNoteClick, onDataChan
                                             <span className="text-sm font-medium text-gray-800 dark:text-gray-200 truncate">
                                                 {task.title}
                                             </span>
-                                            {task.resourceUrl && <Paperclip className="w-3 h-3 text-purple-500" />}
+                                            {task.resourceUrl && (
+                                                <Paperclip
+                                                    className="w-3 h-3 text-purple-500 cursor-pointer hover:text-purple-700 dark:hover:text-purple-400"
+                                                    onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        handleCopyUrl(task.resourceUrl!);
+                                                        if (!e.ctrlKey && !e.metaKey) {
+                                                            window.open(task.resourceUrl, '_blank');
+                                                        }
+                                                    }}
+                                                />
+                                            )}
                                         </div>
                                     </div>
                                     <Button
@@ -253,6 +272,13 @@ export function FavoritesView({ categories, onTaskClick, onNoteClick, onDataChan
                     </section>
                 )}
             </div>
+
+            {/* Copy Toast */}
+            {showCopyToast && (
+                <div className="fixed top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 bg-gray-800 text-white px-4 py-2 rounded-lg shadow-lg z-50 animate-in fade-in zoom-in duration-200 pointer-events-none">
+                    링크가 복사되었습니다
+                </div>
+            )}
         </div>
     );
 }

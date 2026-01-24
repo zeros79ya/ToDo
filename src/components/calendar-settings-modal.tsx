@@ -19,6 +19,16 @@ export interface CalendarSettings {
     completedMode: 'dimmed' | 'strikethrough' | 'hidden';
     todayBgColor: 'blue' | 'yellow' | 'orange' | 'green' | 'none';
     todayBorderColor: 'default' | 'light' | 'medium' | 'dark';
+    // Executive Styles
+    executiveColors: {
+        3: string; // CEO (Level 3)
+        2: string; // Business Unit Head (Level 2)
+        1: string; // Center Head (Level 1)
+    };
+    executiveBorderLightness: number; // 0~100 (Common)
+    executiveBgMode: 'gray' | 'color';
+    executiveBgLightness: number; // 0~100 (Common)
+    showExecutiveIndicator: boolean; // Toggle for the dot indicator
 }
 
 export const DEFAULT_SETTINGS: CalendarSettings = {
@@ -31,6 +41,15 @@ export const DEFAULT_SETTINGS: CalendarSettings = {
     completedMode: 'strikethrough',
     todayBgColor: 'blue',
     todayBorderColor: 'default',
+    executiveColors: {
+        3: 'gray',
+        2: 'gray',
+        1: 'gray',
+    },
+    executiveBorderLightness: 45,
+    executiveBgMode: 'gray',
+    executiveBgLightness: 96,
+    showExecutiveIndicator: true,
 };
 
 interface CalendarSettingsModalProps {
@@ -306,10 +325,138 @@ export function CalendarSettingsModal({
                         </div>
                     </div>
 
+                    <hr className="border-gray-100 dark:border-gray-800" />
+
+                    {/* 4. Executive Schedule Styles */}
+                    <div className="space-y-3">
+                        <h4 className="font-semibold text-sm text-gray-900 dark:text-gray-100 flex items-center gap-2">
+                            <span className="w-1 h-4 bg-indigo-500 rounded-full"></span>
+                            임원 일정 스타일
+                        </h4>
+
+                        {/* Exec Indicator Toggle */}
+                        <div className="grid grid-cols-[120px_1fr] items-center gap-4">
+                            <label className="text-sm text-gray-600 dark:text-gray-400">구분 아이콘(●)</label>
+                            <div className="flex items-center">
+                                <label className="inline-flex items-center cursor-pointer">
+                                    <input
+                                        type="checkbox"
+                                        checked={settings.showExecutiveIndicator ?? true}
+                                        onChange={(e) => handleChange('showExecutiveIndicator', e.target.checked)}
+                                        className="sr-only peer"
+                                    />
+                                    <div className="relative w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-indigo-300 dark:peer-focus:ring-indigo-800 rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-indigo-600"></div>
+                                    <span className="ms-3 text-sm font-medium text-gray-700 dark:text-gray-300">
+                                        {settings.showExecutiveIndicator ? '표시' : '숨김'}
+                                    </span>
+                                </label>
+                            </div>
+                        </div>
+
+                        {/* Executive Colors (Level 3, 2, 1) */}
+                        <div className="grid grid-cols-[120px_1fr] items-start gap-4">
+                            <label className="text-sm text-gray-600 dark:text-gray-400 mt-1">직급별 테마 색상</label>
+                            <div className="space-y-2">
+                                {[
+                                    { level: 1, label: '대표' },
+                                    { level: 2, label: '사업부' },
+                                    { level: 3, label: '센터장' }
+                                ].map((item) => (
+                                    <div key={item.level} className="flex items-center gap-2">
+                                        <span className="text-xs text-gray-500 w-16">{item.label}</span>
+                                        <div className="flex bg-gray-100 dark:bg-gray-800 rounded p-1 flex-1 flex-wrap gap-1">
+                                            {[
+                                                { val: 'gray', label: '회색' },
+                                                { val: 'red', label: '빨강' },
+                                                { val: 'green', label: '초록' },
+                                                { val: 'purple', label: '보라' },
+                                                { val: 'blue', label: '파랑' },
+                                                { val: 'orange', label: '주황' }
+                                            ].map((opt) => (
+                                                <button
+                                                    key={opt.val}
+                                                    onClick={() => handleChange('executiveColors', {
+                                                        ...settings.executiveColors,
+                                                        [item.level]: opt.val
+                                                    })}
+                                                    className={`px-3 py-1 text-[10px] font-medium rounded transition-colors ${settings.executiveColors[item.level as 1 | 2 | 3] === opt.val
+                                                        ? 'bg-white dark:bg-gray-700 text-blue-600 shadow-sm'
+                                                        : 'text-gray-500 hover:text-gray-700'
+                                                        }`}
+                                                >
+                                                    {opt.label}
+                                                </button>
+                                            ))}
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+
+                        {/* Executive Border Lightness */}
+                        <div className="grid grid-cols-[120px_1fr] items-center gap-4">
+                            <div>
+                                <label className="text-sm text-gray-600 dark:text-gray-400 block">테두리/구분선 밝기</label>
+                                <span className="text-[10px] text-gray-400">0(어두움) ~ 100(밝음)</span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                                <input
+                                    type="range"
+                                    min="0"
+                                    max="100"
+                                    value={settings.executiveBorderLightness}
+                                    onChange={(e) => handleChange('executiveBorderLightness', parseInt(e.target.value))}
+                                    className="flex-1 h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-indigo-600"
+                                />
+                                <span className="text-sm font-medium w-8 text-right">{settings.executiveBorderLightness}</span>
+                            </div>
+                        </div>
+
+                        {/* Executive Background Mode */}
+                        <div className="grid grid-cols-[120px_1fr] items-center gap-4">
+                            <label className="text-sm text-gray-600 dark:text-gray-400">배경색 모드</label>
+                            <div className="flex bg-gray-100 dark:bg-gray-800 rounded p-1">
+                                {[
+                                    { val: 'gray', label: '회색 통일 (기본)' },
+                                    { val: 'color', label: '직급별 테마 색상 사용' }
+                                ].map((opt) => (
+                                    <button
+                                        key={opt.val}
+                                        onClick={() => handleChange('executiveBgMode', opt.val)}
+                                        className={`flex-1 py-1 text-xs font-medium rounded transition-colors ${settings.executiveBgMode === opt.val
+                                            ? 'bg-white dark:bg-gray-700 text-blue-600 shadow-sm'
+                                            : 'text-gray-500 hover:text-gray-700'
+                                            }`}
+                                    >
+                                        {opt.label}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+
+                        {/* Executive Background Lightness */}
+                        <div className="grid grid-cols-[120px_1fr] items-center gap-4">
+                            <div>
+                                <label className="text-sm text-gray-600 dark:text-gray-400 block">배경 밝기</label>
+                                <span className="text-[10px] text-gray-400">0(어두움) ~ 100(밝음)</span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                                <input
+                                    type="range"
+                                    min="0"
+                                    max="100"
+                                    value={settings.executiveBgLightness}
+                                    onChange={(e) => handleChange('executiveBgLightness', parseInt(e.target.value))}
+                                    className="flex-1 h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-indigo-600"
+                                />
+                                <span className="text-sm font-medium w-8 text-right">{settings.executiveBgLightness}</span>
+                            </div>
+                        </div>
+                    </div>
 
                     <hr className="border-gray-100 dark:border-gray-800" />
 
-                    {/* 4. Manage Settings (Import/Export) */}
+                    {/* 5. Manage Settings (Import/Export) */}
                     <div className="space-y-3 pt-2">
                         <h4 className="font-semibold text-sm text-gray-900 dark:text-gray-100 flex items-center gap-2">
                             <span className="w-1 h-4 bg-gray-500 rounded-full"></span>
