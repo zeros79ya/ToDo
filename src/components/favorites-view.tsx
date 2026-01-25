@@ -22,6 +22,19 @@ export function FavoritesView({ categories, onTaskClick, onNoteClick, onSchedule
     const [favoriteNotes, setFavoriteNotes] = useState<Note[]>([]);
     const [showCopyToast, setShowCopyToast] = useState(false);
 
+    // Date Filter State (Default: Today +/- 2 weeks)
+    const [startDate, setStartDate] = useState<string>(() => {
+        const d = new Date();
+        d.setDate(d.getDate() - 14);
+        return format(d, 'yyyy-MM-dd');
+    });
+    const [endDate, setEndDate] = useState<string>(() => {
+        const d = new Date();
+        d.setDate(d.getDate() + 14);
+        return format(d, 'yyyy-MM-dd');
+    });
+
+
     const loadFavorites = () => {
         setFavoriteTasks(getTasks().filter(t => t.isFavorite));
         setFavoriteLinks(getQuickLinks().filter(l => l.isFavorite));
@@ -65,12 +78,29 @@ export function FavoritesView({ categories, onTaskClick, onNoteClick, onSchedule
     };
 
     const scheduleCategory = categories.find(c => c.name === '팀 일정');
-    const scheduleTasks = favoriteTasks.filter(t => t.categoryId === scheduleCategory?.id);
-    const regularTasks = favoriteTasks.filter(t => t.categoryId !== scheduleCategory?.id);
 
-    const totalCount = favoriteTasks.length + favoriteLinks.length + favoriteNotes.length;
+    // Filter tasks by date range
+    const filterByDate = (task: Task) => {
+        if (!task.dueDate) return false; // Hide tasks without due date when filtering
+        return task.dueDate >= startDate && task.dueDate <= endDate;
+    };
 
-    if (totalCount === 0) {
+    const scheduleTasks = favoriteTasks
+        .filter(t => t.categoryId === scheduleCategory?.id)
+        .filter(filterByDate);
+
+    const regularTasks = favoriteTasks
+        .filter(t => t.categoryId !== scheduleCategory?.id)
+        .filter(filterByDate);
+
+    const totalCount = scheduleTasks.length + regularTasks.length + favoriteLinks.length + favoriteNotes.length;
+
+    // We don't return early for empty data anymore because the filter might be the reason it's empty
+    // But if total favorites (before filter) is 0, we can still show empty state?
+    // Let's stick to showing the UI so users can adjust filters if needed, unless absolutely no favorites exist.
+    const hasAnyFavorites = favoriteTasks.length + favoriteLinks.length + favoriteNotes.length > 0;
+
+    if (!hasAnyFavorites) {
         return (
             <div className="flex flex-col items-center justify-center h-full text-gray-400">
                 <Star className="w-16 h-16 mb-4 opacity-30" />
@@ -83,11 +113,31 @@ export function FavoritesView({ categories, onTaskClick, onNoteClick, onSchedule
     return (
         <div className="h-full overflow-y-auto p-6">
             <div className="max-w-4xl mx-auto space-y-8">
-                {/* Header */}
-                <div className="flex items-center gap-3">
-                    <Star className="w-6 h-6 text-yellow-500 fill-yellow-500" />
-                    <h1 className="text-2xl font-bold text-gray-800 dark:text-gray-200">즐겨찾기</h1>
-                    <span className="text-sm text-gray-500">({totalCount}개)</span>
+                {/* Header & Filters */}
+                <div className="flex flex-col gap-4">
+                    <div className="flex items-center gap-3">
+                        <Star className="w-6 h-6 text-yellow-500 fill-yellow-500" />
+                        <h1 className="text-2xl font-bold text-gray-800 dark:text-gray-200">즐겨찾기</h1>
+                        <span className="text-sm text-gray-500">({totalCount}개 표시)</span>
+                    </div>
+
+                    {/* Date Range Picker */}
+                    <div className="flex items-center gap-2 bg-gray-50 dark:bg-gray-800/50 p-2 rounded-lg w-fit">
+                        <span className="text-sm font-medium text-gray-600 dark:text-gray-400 px-1">기간:</span>
+                        <input
+                            type="date"
+                            value={startDate}
+                            onChange={(e) => setStartDate(e.target.value)}
+                            className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded px-2 py-1 text-sm text-gray-700 dark:text-gray-300 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                        />
+                        <span className="text-gray-400">~</span>
+                        <input
+                            type="date"
+                            value={endDate}
+                            onChange={(e) => setEndDate(e.target.value)}
+                            className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded px-2 py-1 text-sm text-gray-700 dark:text-gray-300 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                        />
+                    </div>
                 </div>
 
                 {/* Team Schedule Tasks */}
@@ -97,7 +147,7 @@ export function FavoritesView({ categories, onTaskClick, onNoteClick, onSchedule
                             <Calendar className="w-4 h-4" />
                             팀 일정 ({scheduleTasks.length})
                         </h2>
-                        <div className="space-y-2">
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                             {scheduleTasks.map(task => (
                                 <div
                                     key={task.id}
@@ -155,7 +205,7 @@ export function FavoritesView({ categories, onTaskClick, onNoteClick, onSchedule
                             <FileText className="w-4 h-4" />
                             할 일 ({regularTasks.length})
                         </h2>
-                        <div className="space-y-2">
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                             {regularTasks.map(task => (
                                 <div
                                     key={task.id}

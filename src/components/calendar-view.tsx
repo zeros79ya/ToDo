@@ -13,6 +13,7 @@ import {
     isSameMonth,
     isToday,
     isSameDay,
+    addWeeks,
     addDays,
     getWeek,
     getMonth,
@@ -28,6 +29,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { TeamScheduleAddModal } from './team-schedule-add-modal';
 import { TeamScheduleSearchModal } from './team-schedule-search-modal';
 import { CalendarSettingsModal, CalendarSettings, DEFAULT_SETTINGS } from './calendar-settings-modal';
+import { getHoliday } from '../lib/holidays';
 import { Settings } from 'lucide-react';
 
 interface CalendarViewProps {
@@ -415,7 +417,7 @@ export function CalendarView({
                         <div
                             key={day}
                             className={`py-2 text-center text-sm font-medium ${i === 0 ? 'text-red-500' : i === 6 ? 'text-blue-500' : 'text-gray-500 dark:text-gray-400'
-                                } border-r border-gray-200 dark:border-gray-700 last:border-r-0`}
+                                } border-r border-gray-200 dark:border-gray-700`}
                         >
                             {day}
                         </div>
@@ -462,7 +464,14 @@ export function CalendarView({
         const monthEnd = endOfMonth(monthStart);
         // Change weekStartsOn to 0 (Sunday)
         const startDate = startOfWeek(monthStart, { weekStartsOn: 0 });
-        const endDate = endOfWeek(monthEnd, { weekStartsOn: 0 });
+        let endDate = endOfWeek(monthEnd, { weekStartsOn: 0 });
+
+        // If the month ends exactly on the last day of the week (Saturday),
+        // the grid will cut off without showing any days of the next month.
+        // In this case, add one more week to show the start of the next month.
+        if (isSameDay(monthEnd, endDate)) {
+            endDate = addWeeks(endDate, 1);
+        }
 
         const days = eachDayOfInterval({ start: startDate, end: endDate });
         const weeks: Date[][] = [];
@@ -508,7 +517,7 @@ export function CalendarView({
                             {/* Day Cells */}
                             {weekDays.map((day) => {
                                 const dayOfWeek = day.getDay(); // 0=Sun, 6=Sat
-                                if (!showWeekends && (dayOfWeek === 0 || dayOfWeek === 6)) return null;
+                                if (!showWeekends && dayOfWeek === 0) return null;
 
                                 const isCurrentMonth = isSameMonth(day, currentMonth);
                                 const isDropTarget = dropTargetDate && isSameDay(day, dropTargetDate);
@@ -584,6 +593,10 @@ export function CalendarView({
                                     ? todayBgClass
                                     : `${defaultBgClass} ${todayBgClass}`;
 
+                                // Determine if it is a holiday
+                                const holidayName = getHoliday(day);
+                                const isHoliday = !!holidayName;
+
                                 return (
                                     <motion.div
                                         key={day.toISOString()}
@@ -602,12 +615,20 @@ export function CalendarView({
                                         onDragLeave={handleDragLeave}
                                         onDrop={(e) => handleDrop(e, day)}
                                     >
-                                        {/* Date Number */}
-                                        <div className={`text-sm font-medium mb-1 ${!isCurrentMonth ? 'text-gray-300 dark:text-gray-600' :
-                                            dayOfWeek === 0 ? 'text-red-500' :
-                                                dayOfWeek === 6 ? 'text-blue-500' : 'text-gray-700 dark:text-gray-200'
-                                            } ${isToday(day) ? 'bg-blue-600 text-white rounded-full w-6 h-6 flex items-center justify-center border-2 border-gray-600 dark:border-gray-400' : ''}`}>
-                                            {format(day, 'd')}
+                                        <div className="flex items-center justify-between mb-1">
+                                            <div className="flex items-center gap-1.5 flex-wrap">
+                                                <div className={`text-sm font-medium ${!isCurrentMonth ? 'text-gray-300 dark:text-gray-600' :
+                                                    (isHoliday || dayOfWeek === 0) ? 'text-red-500' :
+                                                        dayOfWeek === 6 ? 'text-blue-500' : 'text-gray-700 dark:text-gray-200'
+                                                    } ${isToday(day) ? 'bg-blue-600 text-white rounded-full w-6 h-6 flex items-center justify-center border-2 border-gray-600 dark:border-gray-400' : ''}`}>
+                                                    {format(day, 'd')}
+                                                </div>
+                                                {(isHoliday && isCurrentMonth) && (
+                                                    <span className="text-[10px] text-red-500 truncate max-w-[80px] leading-tight font-medium">
+                                                        {holidayName}
+                                                    </span>
+                                                )}
+                                            </div>
                                         </div>
 
                                         <div
