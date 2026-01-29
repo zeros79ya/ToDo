@@ -20,6 +20,7 @@ export interface Task {
     assignee: string;
     organizer?: string; // 주관자 (이름 / 소속)
     resourceUrl: string;
+    resourceUrls?: string[]; // Multiple resource URLs
     notes: string;
     dueDate: string | null;
     dueTime: string | null; // HH:mm format like "14:30"

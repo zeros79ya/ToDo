@@ -47,7 +47,7 @@ export function TaskDetailDialog({
     const [title, setTitle] = useState('');
     const [isFavorite, setIsFavorite] = useState(false);
     const [assignee, setAssignee] = useState('');
-    const [resourceUrl, setResourceUrl] = useState('');
+    const [resourceUrls, setResourceUrls] = useState<string[]>(['']);
     const [notes, setNotes] = useState('');
     const [dueDate, setDueDate] = useState<Date | undefined>(undefined);
     const [dueTime, setDueTime] = useState('');
@@ -74,7 +74,10 @@ export function TaskDetailDialog({
             setTitle(task.title);
             setIsFavorite(task.isFavorite || false);
             setAssignee(task.assignee || '');
-            setResourceUrl(task.resourceUrl || '');
+            const initialUrls = task.resourceUrls && task.resourceUrls.length > 0
+                ? task.resourceUrls
+                : (task.resourceUrl ? [task.resourceUrl] : ['']);
+            setResourceUrls(initialUrls);
             setNotes(task.notes);
             setDueDate(task.dueDate ? new Date(task.dueDate) : undefined);
             setDueTime(task.dueTime || '');
@@ -90,11 +93,16 @@ export function TaskDetailDialog({
 
     const handleSave = (shouldSort: boolean = false) => {
         if (task && title.trim()) {
+            const validUrls = resourceUrls.filter(u => u.trim());
+            // Legacy support: keep primary URL synced
+            const legacyUrl = validUrls.length > 0 ? validUrls[0] : '';
+
             if (isNewTask) {
                 // Create new task
                 addTask(task.categoryId, title.trim(), dueDate ? dueDate.toISOString() : null, {
                     assignee: assignee.trim(),
-                    resourceUrl: resourceUrl.trim(),
+                    resourceUrl: legacyUrl,
+                    resourceUrls: validUrls,
                     notes,
                     dueTime: dueTime || null,
                     tags,
@@ -107,7 +115,8 @@ export function TaskDetailDialog({
                 updateTask(task.id, {
                     title: title.trim(),
                     assignee: assignee.trim(),
-                    resourceUrl: resourceUrl.trim(),
+                    resourceUrl: legacyUrl,
+                    resourceUrls: validUrls,
                     notes,
                     dueDate: dueDate ? dueDate.toISOString() : null,
                     dueTime: dueTime || null,
@@ -293,6 +302,21 @@ export function TaskDetailDialog({
         }
     };
 
+    const handleAddUrl = () => {
+        setResourceUrls([...resourceUrls, '']);
+    };
+
+    const handleRemoveUrl = (index: number) => {
+        const newUrls = resourceUrls.filter((_, i) => i !== index);
+        setResourceUrls(newUrls.length > 0 ? newUrls : ['']);
+    };
+
+    const handleUrlChange = (index: number, value: string) => {
+        const newUrls = [...resourceUrls];
+        newUrls[index] = value;
+        setResourceUrls(newUrls);
+    };
+
     if (!task) return null;
 
     return (
@@ -353,27 +377,54 @@ export function TaskDetailDialog({
 
                         {/* Resource URL */}
                         <div>
-                            <label className="text-sm font-medium text-gray-700">자료</label>
-                            <div className="flex items-center gap-2 mt-1">
-                                <Input
-                                    value={resourceUrl}
-                                    onChange={(e) => setResourceUrl(e.target.value)}
-                                    placeholder="https://example.com"
-                                    className="flex-1"
-                                    tabIndex={3}
-                                    onKeyDown={handleKeyDown}
-                                />
-                                {resourceUrl && (
-                                    <Button
-                                        variant="outline"
-                                        size="sm"
-                                        onClick={() => window.open(resourceUrl, '_blank')}
-                                        className="h-10 px-3"
-                                        title="링크 열기"
-                                    >
-                                        <Link className="h-4 w-4" />
-                                    </Button>
-                                )}
+                            <div className="flex items-center justify-between">
+                                <label className="text-sm font-medium text-gray-700">자료</label>
+
+                                <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={handleAddUrl}
+                                    className="h-6 px-2 text-xs text-blue-600 hover:bg-blue-50"
+                                >
+                                    <Plus className="w-3 h-3 mr-1" /> 추가
+                                </Button>
+                            </div>
+                            <div className="space-y-2 mt-1">
+                                {resourceUrls.map((url, index) => (
+                                    <div key={index} className="flex items-center gap-2">
+                                        <Input
+                                            value={url}
+                                            onChange={(e) => handleUrlChange(index, e.target.value)}
+                                            placeholder="https://example.com"
+                                            className="flex-1"
+                                            tabIndex={3}
+                                            onKeyDown={handleKeyDown}
+                                        />
+                                        {url && (
+                                            <Button
+                                                variant="outline"
+                                                size="sm"
+                                                onClick={() => window.open(url, '_blank')}
+                                                className="h-10 px-3"
+                                                title="링크 열기"
+                                                tabIndex={-1}
+                                            >
+                                                <Link className="h-4 w-4" />
+                                            </Button>
+                                        )}
+                                        <Button
+                                            variant="ghost"
+                                            size="sm"
+                                            onClick={() => handleRemoveUrl(index)}
+                                            className="h-10 w-10 p-0 text-gray-400 hover:text-red-500"
+                                            tabIndex={-1}
+                                            title="삭제"
+                                        >
+                                            <X className="h-4 w-4" />
+                                        </Button>
+                                    </div>
+                                ))}
                             </div>
                         </div>
 

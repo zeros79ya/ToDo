@@ -882,8 +882,8 @@ export function CalendarView({
                                                                     : {
                                                                         height: `${itemHeight}px`,
                                                                         fontSize: `${settings.fontSize}px`,
-                                                                        backgroundColor: `${taskColor}15`,
-                                                                        color: taskColor,
+                                                                        backgroundColor: `${taskColor}${Math.floor(Math.max(5, Math.min(95, 100 - (settings.bgLightness ?? 96))) * 2.55).toString(16).padStart(2, '0')}`,
+                                                                        // color: taskColor, // Removed to match Team Schedule color
                                                                         borderLeft: `3px solid ${taskColor}`,
                                                                         // Apply category-based border to all sides when showBorder is enabled
                                                                         // Use taskColor with 50% opacity (hex color + '80' suffix)
@@ -892,6 +892,14 @@ export function CalendarView({
                                                                         borderBottom: settings.showBorder ? `1px solid ${taskColor}80` : undefined,
                                                                     };
 
+                                                            const totalSubtasks = task.subtasks?.length || 0;
+                                                            const completedSubtasks = task.subtasks?.filter(s => s.completed).length || 0;
+                                                            const hasChecklist = totalSubtasks > 0;
+                                                            const checklistMode = settings.checklistDisplayMode || 'none';
+                                                            const showChecklistText = hasChecklist && (checklistMode === 'text' || checklistMode === 'both');
+                                                            const showChecklistBar = hasChecklist && (checklistMode === 'bar' || checklistMode === 'both');
+                                                            const checklistProgress = hasChecklist ? (completedSubtasks / totalSubtasks) * 100 : 0;
+
                                                             return (
                                                                 <div
                                                                     key={task.id}
@@ -899,7 +907,7 @@ export function CalendarView({
                                                                     onDragStart={(e) => handleDragStart(e, task.id)}
                                                                     onDragEnd={() => setDraggedTaskId(null)}
                                                                     className={`group/task relative px-1.5 rounded cursor-grab active:cursor-grabbing transition-all w-full overflow-hidden flex items-center ${draggedTaskId === task.id ? 'opacity-50 scale-95' : ''
-                                                                        } ${task.completed ? 'bg-gray-100 dark:bg-gray-800 text-gray-400 dark:text-gray-500' : 'dark:!bg-gray-700 dark:!text-gray-300'} ${completedClass}`}
+                                                                        } ${task.completed ? 'bg-gray-100 dark:bg-gray-800 text-gray-400 dark:text-gray-500' : 'text-gray-900 dark:text-gray-100 dark:!bg-gray-700'} ${completedClass}`}
                                                                     style={TaskStyle}
                                                                     onClick={(e) => {
                                                                         e.stopPropagation();
@@ -910,11 +918,36 @@ export function CalendarView({
                                                                             onTaskClick(task);
                                                                         }
                                                                     }}
-                                                                    title={`${task.title}${task.dueTime ? ` (${task.dueTime})` : ''}`}
+                                                                    title={`${task.title}${task.dueTime ? ` (${task.dueTime})` : ''}${hasChecklist ? ` (${completedSubtasks}/${totalSubtasks})` : ''}`}
                                                                 >
-                                                                    <div className="flex items-center justify-between w-full min-w-0">
+                                                                    {/* Progress Bar (Segmented) */}
+                                                                    {showChecklistBar && (
+                                                                        <div className="absolute bottom-0 left-0 w-full h-[3px] flex gap-[1px] px-[1px]">
+                                                                            {Array.from({ length: totalSubtasks }).map((_, i) => (
+                                                                                <div
+                                                                                    key={i}
+                                                                                    className={`flex-1 h-full rounded-sm ${i < completedSubtasks
+                                                                                        ? '' // Color is applied via style
+                                                                                        : 'bg-gray-300/50 dark:bg-gray-600/50'
+                                                                                        }`}
+                                                                                    style={
+                                                                                        i < completedSubtasks
+                                                                                            ? { backgroundColor: taskColor }
+                                                                                            : {}
+                                                                                    }
+                                                                                />
+                                                                            ))}
+                                                                        </div>
+                                                                    )}
+
+                                                                    <div className="flex items-center justify-between w-full min-w-0 mb-[1px]">
                                                                         <div className="truncate flex-1 min-w-0 flex items-center">
                                                                             {task.dueTime && <span className="opacity-60 mr-1 whitespace-nowrap">{task.dueTime}</span>}
+                                                                            {showChecklistText && (
+                                                                                <span className="text-[10px] opacity-80 mr-1 font-mono tracking-tight">
+                                                                                    ({completedSubtasks}/{totalSubtasks})
+                                                                                </span>
+                                                                            )}
                                                                             <span className="truncate">{task.title}</span>
                                                                         </div>
                                                                         {task.resourceUrl && (

@@ -24,7 +24,7 @@ import {
     DialogTitle,
 } from '@/components/ui/dialog';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { Plus, SortAsc, ArrowUpDown, CheckCircle2, GripVertical, Calendar, FileText, MoreVertical, Trash2, User, Paperclip, Tag, X, Search, Archive, Pin, CalendarDays } from 'lucide-react';
+import { Plus, SortAsc, ArrowUpDown, CheckCircle2, GripVertical, Calendar, FileText, MoreVertical, Trash2, User, Paperclip, Tag, X, Search, Archive, Pin, CalendarDays, ChevronDown, ChevronUp } from 'lucide-react';
 import { Reorder, useDragControls, motion, AnimatePresence } from 'framer-motion';
 import { format } from 'date-fns';
 import { ko } from 'date-fns/locale';
@@ -35,6 +35,7 @@ interface TaskListProps {
     categories: Category[];
     tasks: Task[];
     onTasksChange: () => void;
+    collectionGroups?: string[];
 }
 
 // Inline TaskItem component with Framer Motion drag
@@ -48,6 +49,8 @@ function AnimatedTaskItem({
     onTagClick,
     onTogglePin,
     onClick,
+    isExpanded,
+    onToggleExpand,
 }: {
     task: Task;
     categoryColor: string;
@@ -58,6 +61,8 @@ function AnimatedTaskItem({
     onTagClick: (tag: string) => void;
     onTogglePin: (task: Task) => void;
     onClick: () => void;
+    isExpanded?: boolean;
+    onToggleExpand?: () => void;
 }) {
     const dragControls = useDragControls();
     const [isEditing, setIsEditing] = useState(false);
@@ -246,19 +251,27 @@ function AnimatedTaskItem({
                                 {task.assignee}
                             </div>
                         )}
-                        {task.resourceUrl && (
-                            <div
-                                className="flex items-center justify-center text-purple-500 cursor-pointer hover:text-purple-700 p-1.5 -m-1.5 rounded hover:bg-purple-50 transition-all hover:scale-125"
-                                onClick={(e) => {
-                                    e.stopPropagation();
-                                    handleCopyUrl(task.resourceUrl!);
-                                    if (!e.ctrlKey && !e.metaKey) {
-                                        window.open(task.resourceUrl, '_blank');
-                                    }
-                                }}
-                                title={task.resourceUrl}
-                            >
-                                <Paperclip className="w-4 h-3" />
+                        {((task.resourceUrls && task.resourceUrls.length > 0) || task.resourceUrl) && (
+                            <div className="flex items-center gap-1">
+                                {(task.resourceUrls && task.resourceUrls.length > 0
+                                    ? task.resourceUrls
+                                    : [task.resourceUrl]
+                                ).map((url, index) => (
+                                    <div
+                                        key={index}
+                                        className="flex items-center justify-center text-purple-500 cursor-pointer hover:text-purple-700 p-1.5 -m-1.5 rounded hover:bg-purple-50 transition-all hover:scale-125"
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            handleCopyUrl(url);
+                                            if (!e.ctrlKey && !e.metaKey) {
+                                                window.open(url, '_blank');
+                                            }
+                                        }}
+                                        title={url}
+                                    >
+                                        <Paperclip className="w-4 h-3" />
+                                    </div>
+                                ))}
                             </div>
                         )}
                         {task.notes && (
@@ -309,21 +322,79 @@ function AnimatedTaskItem({
                         )}
                         {/* Subtasks Progress */}
                         {task.subtasks && task.subtasks.length > 0 && (
-                            <div className="flex items-center gap-1.5">
-                                <div className="w-12 h-1.5 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
-                                    <div
-                                        className="h-full bg-green-500 transition-all"
-                                        style={{
-                                            width: `${(task.subtasks.filter(s => s.completed).length / task.subtasks.length) * 100}%`
-                                        }}
-                                    />
+                            <div
+                                className="flex items-center gap-1.5 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700 rounded px-1 -ml-1 transition-colors"
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    onClick();
+                                    onToggleExpand?.();
+                                }}
+                            >
+                                <div className="w-12 h-1.5 flex gap-[1px]">
+                                    {Array.from({ length: task.subtasks.length }).map((_, i) => (
+                                        <div
+                                            key={i}
+                                            className={`flex-1 h-full rounded-[1px] ${i < task.subtasks!.filter(s => s.completed).length
+                                                ? 'bg-gray-400 dark:bg-gray-500' // Completed: Medium Gray
+                                                : 'bg-gray-200 dark:bg-gray-700' // Empty: Light Gray
+                                                }`}
+                                        />
+                                    ))}
                                 </div>
                                 <span className="text-[10px] text-gray-500 dark:text-gray-400">
                                     {task.subtasks.filter(s => s.completed).length}/{task.subtasks.length}
                                 </span>
                             </div>
                         )}
+
+                        {/* Expand Toggle Chevron */}
+                        {task.subtasks && task.subtasks.length > 0 && (
+                            <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-6 w-6 p-0 text-gray-400 hover:text-blue-500 hover:bg-blue-50 ml-1 rounded-full"
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    onClick();
+                                    onToggleExpand?.();
+                                }}
+                            >
+                                {isExpanded ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+                            </Button>
+                        )}
+
                     </div>
+
+                    {/* Expandable Subtasks List */}
+                    {isExpanded && task.subtasks && (
+                        <div className="w-full mt-2 pl-1 space-y-1">
+                            {task.subtasks.map((subtask) => (
+                                <div
+                                    key={subtask.id}
+                                    className="flex items-center gap-2 group/sub cursor-pointer hover:bg-gray-50/50 dark:hover:bg-gray-800/50 rounded py-0.5"
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        onClick();
+                                        // Toggle check logic
+                                        const newSubtasks = task.subtasks!.map(s =>
+                                            s.id === subtask.id ? { ...s, completed: !s.completed } : s
+                                        );
+                                        updateTask(task.id, { subtasks: newSubtasks });
+                                        onTaskChange();
+                                    }}
+                                >
+                                    <Checkbox
+                                        checked={subtask.completed}
+                                        onCheckedChange={() => { }} // Handled by div click
+                                        className="h-3.5 w-3.5 rounded-full border-2 data-[state=checked]:!bg-gray-400 data-[state=checked]:!border-gray-400 pointer-events-none"
+                                    />
+                                    <span className={`text-xs ${subtask.completed ? 'line-through text-gray-400' : 'text-gray-600 dark:text-gray-300'}`}>
+                                        {subtask.title}
+                                    </span>
+                                </div>
+                            ))}
+                        </div>
+                    )}
                 </div>
 
                 {/* Actions */}
@@ -401,7 +472,7 @@ function AnimatedTaskItem({
     );
 }
 
-export function TaskList({ category, categories, tasks, onTasksChange }: TaskListProps) {
+export function TaskList({ category, categories, tasks, onTasksChange, collectionGroups = [] }: TaskListProps) {
     const [newTaskTitle, setNewTaskTitle] = useState('');
     const [isAddingTask, setIsAddingTask] = useState(false);
     const [detailTask, setDetailTask] = useState<Task | null>(null);
@@ -412,6 +483,22 @@ export function TaskList({ category, categories, tasks, onTasksChange }: TaskLis
     const [selectedTag, setSelectedTag] = useState<string | null>(null);
     const [searchQuery, setSearchQuery] = useState('');
     const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+    const [expandedTaskIds, setExpandedTaskIds] = useState<string[]>([]);
+
+    const toggleTaskExpanded = (taskId: string, force?: boolean) => {
+        setExpandedTaskIds(prev => {
+            const isExpanded = prev.includes(taskId);
+            if (force === true && isExpanded) return prev;
+            if (force === false && !isExpanded) return prev;
+
+            if (isExpanded && force !== true) {
+                return prev.filter(id => id !== taskId);
+            } else if (!isExpanded && force !== false) {
+                return [...prev, taskId];
+            }
+            return prev;
+        });
+    };
     const [showTodayOnly, setShowTodayOnly] = useState(false);
     const searchInputRef = useRef<HTMLInputElement>(null);
 
@@ -604,7 +691,7 @@ export function TaskList({ category, categories, tasks, onTasksChange }: TaskLis
             }
 
             // Arrow keys: Navigate tasks
-            if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+            if ((e.key === 'ArrowDown' || e.key === 'ArrowUp') && !e.ctrlKey) {
                 e.preventDefault();
                 if (allVisibleTasks.length === 0) return;
 
@@ -619,6 +706,15 @@ export function TaskList({ category, categories, tasks, onTasksChange }: TaskLis
                     newIndex = currentIndex > 0 ? currentIndex - 1 : allVisibleTasks.length - 1;
                 }
                 setSelectedTaskId(allVisibleTasks[newIndex].id);
+                return;
+            }
+
+            // Ctrl + Arrow: Expand/Collapse selected task
+            if (e.ctrlKey && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
+                if (selectedTaskId) {
+                    e.preventDefault();
+                    toggleTaskExpanded(selectedTaskId, e.key === 'ArrowDown'); // Down=Expand(true), Up=Collapse(false)
+                }
                 return;
             }
 
@@ -928,6 +1024,8 @@ export function TaskList({ category, categories, tasks, onTasksChange }: TaskLis
                                         onTagClick={setSelectedTag}
                                         onTogglePin={handleTogglePin}
                                         onClick={() => setSelectedTaskId(task.id)}
+                                        isExpanded={expandedTaskIds.includes(task.id)}
+                                        onToggleExpand={() => toggleTaskExpanded(task.id)}
                                     />
                                 ))}
                             </AnimatePresence>
@@ -1140,6 +1238,7 @@ export function TaskList({ category, categories, tasks, onTasksChange }: TaskLis
                 onClose={() => setDetailTask(null)}
                 onTaskChange={onTasksChange}
                 onSortByDate={handleSortByDate}
+                collectionGroups={collectionGroups}
             />
 
             {/* Delete Confirmation Dialog for Completed Tasks */}

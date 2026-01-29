@@ -12,6 +12,7 @@ import { TaskDetailDialog } from '@/components/task-detail-dialog';
 import { ImportExportDialog } from '@/components/import-export-dialog';
 import { ScheduleImportDialog } from '@/components/schedule-import-dialog';
 import { TeamScheduleAddModal } from '@/components/team-schedule-add-modal';
+import { SearchCommandDialog } from '@/components/search-command-dialog';
 import { ParsedSchedule, parseScheduleText } from '@/lib/schedule-parser';
 import { Button } from '@/components/ui/button';
 import { PanelLeftClose, PanelLeft, Sun, Moon } from 'lucide-react';
@@ -39,6 +40,7 @@ export default function Home() {
   const [isTeamScheduleModalOpen, setIsTeamScheduleModalOpen] = useState(false);
   const [editingScheduleTask, setEditingScheduleTask] = useState<Task | null>(null);
   const [collectionGroups, setCollectionGroups] = useState<string[]>(['CP', 'OLB', 'LASER', '라미1', '라미2']);
+  const [isSearchOpen, setIsSearchOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
   // Load categories from LocalStorage
@@ -177,6 +179,11 @@ export default function Home() {
             console.log(`프리셋 ${presetIndex + 1} 없음`);
           }
         }
+      }
+      // Search: Ctrl + K
+      if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+        e.preventDefault();
+        setIsSearchOpen(prev => !prev);
       }
     };
     window.addEventListener('keydown', handleKeyDown);
@@ -509,6 +516,7 @@ export default function Home() {
                     setCurrentMonth(date);
                   }}
                   onImportSchedule={() => setIsScheduleImportOpen(true)}
+                  onSearchClick={() => setIsSearchOpen(true)}
 
                   onPinnedMemoClick={(noteId) => {
                     setViewMode('keep');
@@ -543,6 +551,7 @@ export default function Home() {
                 return category?.name !== '팀 일정';
               })}
               onTasksChange={handleTasksChange}
+              collectionGroups={collectionGroups}
             />
           </div>
         );
@@ -655,6 +664,23 @@ export default function Home() {
         initialDate={new Date()} // Not used for edit
         teamScheduleCategoryId={categories.find(c => c.name === '팀 일정')?.id || ''}
         existingTask={editingScheduleTask}
+      />
+      <SearchCommandDialog
+        isOpen={isSearchOpen}
+        onClose={() => setIsSearchOpen(false)}
+        onSelectTask={(task) => {
+          setDetailTask(task);
+        }}
+        onSelectNote={(noteId) => {
+          setViewMode('keep');
+          // Wait for view switch then select?
+          // We might need a way to pass 'initialSelectedNoteId' or similar.
+          // For now, let's just switch view.
+          // Actually, sidebar has onPinnedMemoClick which does setSelectedNoteId if we expose it?
+          // Page doesn't have direct access to keepView state unless lifted.
+          // But we have setSelectedNoteId in page!
+          setSelectedNoteId(noteId);
+        }}
       />
     </div>
   );

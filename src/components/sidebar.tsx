@@ -37,6 +37,7 @@ import {
     GripVertical,
     Pin,
     Star,
+    Search,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -57,6 +58,7 @@ interface SidebarProps {
     notesVersion?: number;
     viewMode: 'calendar' | 'keep' | 'favorites';
     onViewModeChange: (mode: 'calendar' | 'keep' | 'favorites') => void;
+    onSearchClick: () => void;
 }
 
 export function Sidebar({
@@ -76,6 +78,7 @@ export function Sidebar({
     notesVersion,
     viewMode,
     onViewModeChange,
+    onSearchClick,
 }: SidebarProps) {
     const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
     const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
@@ -312,6 +315,18 @@ export function Sidebar({
                     <CheckSquare className="w-5 h-5" />
                     <span className="text-lg font-semibold">Local Tasks</span>
                 </div>
+
+                <Button
+                    variant="outline"
+                    className="w-full justify-between text-gray-400 font-normal hover:text-gray-900 dark:hover:text-gray-200 mb-2 h-9 border-gray-200 dark:border-gray-700 bg-gray-50/50 dark:bg-gray-800/50"
+                    onClick={onSearchClick}
+                >
+                    <span className="flex items-center gap-2 text-xs">
+                        <Search className="w-3.5 h-3.5" />
+                        검색...
+                    </span>
+                    <span className="text-[10px] bg-gray-200 dark:bg-gray-700 px-1.5 py-0.5 rounded text-gray-500 dark:text-gray-400">Ctrl K</span>
+                </Button>
 
                 {/* Collapsible Mini Calendar - Only in Calendar Mode */}
                 {viewMode === 'calendar' && (

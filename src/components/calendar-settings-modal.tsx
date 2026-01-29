@@ -31,6 +31,7 @@ export interface CalendarSettings {
     showExecutiveIndicator: boolean; // Toggle for the dot indicator
     // Collection Template (취합 템플릿)
     collectionGroups: string[]; // 취합 시 자동 추가되는 그룹 목록
+    checklistDisplayMode?: 'none' | 'text' | 'bar' | 'both'; // 체크리스트 표시 방식
 }
 
 export const DEFAULT_SETTINGS: CalendarSettings = {
@@ -53,6 +54,7 @@ export const DEFAULT_SETTINGS: CalendarSettings = {
     executiveBgLightness: 96,
     showExecutiveIndicator: true,
     collectionGroups: ['CP', 'OLB', 'LASER', '라미1', '라미2'],
+    checklistDisplayMode: 'none',
 };
 
 interface CalendarSettingsModalProps {
@@ -265,6 +267,21 @@ export function CalendarSettingsModal({
                                 <option value="dimmed">흐리게 표시 (Dimmed)</option>
                                 <option value="strikethrough">취소선 (Strike-through)</option>
                                 <option value="hidden">숨기기 (Hidden)</option>
+                            </select>
+                        </div>
+
+                        {/* Checklist Display Mode */}
+                        <div className="grid grid-cols-[120px_1fr] items-center gap-4">
+                            <label className="text-sm text-gray-600 dark:text-gray-400">체크리스트 표시</label>
+                            <select
+                                value={settings.checklistDisplayMode || 'none'}
+                                onChange={(e) => handleChange('checklistDisplayMode', e.target.value)}
+                                className="w-full px-2 py-1.5 text-sm border rounded focus:ring-2 focus:ring-purple-500 dark:bg-gray-800 dark:border-gray-700"
+                            >
+                                <option value="none">표시 안 함</option>
+                                <option value="text">텍스트 (1/5) </option>
+                                <option value="bar">진행바 (하단 표시)</option>
+                                <option value="both">텍스트 + 진행바</option>
                             </select>
                         </div>
                     </div>
