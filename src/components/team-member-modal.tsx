@@ -108,8 +108,9 @@ export function TeamMemberModal({ member, isOpen, onClose, onUpdate }: TeamMembe
                         <InfoRow icon={AtSign} label="Knox ID" value={member.knoxId} field="knoxId" />
                         <InfoRow icon={Hash} label="사번" value={member.employeeId} field="employeeId" />
                         <InfoRow icon={Building2} label="소속" value={member.department} field="department" />
-                        <InfoRow icon={Briefcase} label="공정" value={member.process} field="process" />
+                        <InfoRow icon={Briefcase} label="그룹" value={member.group} field="group" />
                         <InfoRow icon={Briefcase} label="파트" value={member.part} field="part" />
+                        <InfoRow icon={Briefcase} label="공정/설비" value={member.processType} field="processType" />
                         <InfoRow icon={User} label="직급" value={member.position} field="position" />
                         <InfoRow icon={Calendar} label="직급연차" value={member.positionYear} field="positionYear" />
                         <InfoRow icon={Calendar} label="출생년도" value={member.birthYear} field="birthYear" />

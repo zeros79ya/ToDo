@@ -1,26 +1,127 @@
-import { Category, Task, AppData, CATEGORY_COLORS } from './types';
+﻿import { Category, Task, AppData, CATEGORY_COLORS } from './types';
+import { idbDelete, idbGetAll, idbSet, idbGet } from './indexeddb-storage';
 
 const STORAGE_KEY = 'local-tasks-data';
+const IDB_MIGRATION_KEY = 'local-tasks-idb-migrated-v1';
+
+const IDB_SYNC_KEYS = [
+    // Core data
+    'local-tasks-data',
+    'local-tasks-quick-links',
+    'local-tasks-notes',
+    'local-tasks-labels',
+    'local-tasks-theme',
+    'local-tasks-layout',
+    'local-tasks-layout-state',
+    'local-tasks-layout-presets',
+    'local-tasks-team-members',
+    'local-tasks-business-trips',
+    'local-tasks-trip-records',
+    'tripNameResolutions',
+    'tripDestinationMappings',
+    // UI/state keys
+    'calendar-settings',
+    'calendar-collapsed-weeks',
+    'search-history',
+    'sidebar_calendar_expanded',
+    'sidebar_quicklinks_expanded',
+    'sidebar_pinnedmemos_expanded',
+    'team-member-custom-columns',
+    'team-member-visible-columns',
+    'tripViewMode',
+    'tripCategoryColors',
+    'ganttViewPrefs',
+    'tripRecordColumns',
+    'tripRecordHeaders',
+    'local-tasks-current-view',
+    'local-tasks-current-month',
+    'local-tasks-selected-date',
+    'local-tasks-selected-category-ids',
+    IDB_MIGRATION_KEY,
+] as const;
+
+function shouldSyncKey(key: string): boolean {
+    return (IDB_SYNC_KEYS as readonly string[]).includes(key);
+}
+
+function getStorageItem(key: string): string | null {
+    if (typeof window === 'undefined') return null;
+    return localStorage.getItem(key);
+}
+
+function setStorageItem(key: string, value: string): void {
+    if (typeof window === 'undefined') return;
+    localStorage.setItem(key, value);
+    if (shouldSyncKey(key)) {
+        void idbSet(key, value).catch(() => undefined);
+    }
+}
+
+function removeStorageItem(key: string): void {
+    if (typeof window === 'undefined') return;
+    localStorage.removeItem(key);
+    if (shouldSyncKey(key)) {
+        void idbDelete(key).catch(() => undefined);
+    }
+}
+
+export async function initializeIndexedDBStorage(): Promise<void> {
+    if (typeof window === 'undefined') return;
+    try {
+        // One-time migration from current localStorage data to IndexedDB.
+        if (getStorageItem(IDB_MIGRATION_KEY) !== '2') {
+            console.log("MIGRATING TO INDEXEDDB (V2)");
+            // 1. Move all tracked heavy keys to IDB
+            for (const key of IDB_SYNC_KEYS) {
+                const valueStr = getStorageItem(key);
+                if (valueStr !== null) {
+                    try {
+                        // Assuming the string is JSON, parse it to store natively
+                        await idbSet(key, JSON.parse(valueStr));
+                    } catch {
+                        // If it's not JSON (like a simple string 'light'), store as string
+                        await idbSet(key, valueStr);
+                    }
+                }
+            }
+
+            // 2. Mark migration complete
+            setStorageItem(IDB_MIGRATION_KEY, '2');
+            await idbSet(IDB_MIGRATION_KEY, '2');
+
+            // 3. Clean up heavy items from localStorage to prevent 5MB crash
+            const heavyKeys = [
+                'local-tasks-data', 'local-tasks-quick-links', 'local-tasks-notes',
+                'local-tasks-labels', 'local-tasks-team-members', 'local-tasks-business-trips',
+                'local-tasks-trip-records', 'tripNameResolutions'
+            ];
+            heavyKeys.forEach(k => localStorage.removeItem(k));
+            console.log("MIGRATION COMPLETE. CLEANED LOCALSTORAGE.");
+        }
+    } catch (e) {
+        console.error('IndexedDB migration failed:', e);
+    }
+}
 
 // Generate unique ID
 export function generateId(): string {
     return `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 }
 
-// Get all data from LocalStorage
-export function getData(): AppData {
+// Get all data from IndexedDB
+export async function getAppData(): Promise<AppData> {
     if (typeof window === 'undefined') {
         return { categories: [], tasks: [] };
     }
 
-    const data = localStorage.getItem(STORAGE_KEY);
+    const data = await idbGet<AppData>(STORAGE_KEY);
     if (!data) {
         // Initialize with default category
         const defaultData: AppData = {
             categories: [
                 {
                     id: generateId(),
-                    name: '내 할 일',
+                    name: '내할일',
                     color: CATEGORY_COLORS[0].value,
                     order: 0,
                     createdAt: new Date().toISOString(),
@@ -28,26 +129,27 @@ export function getData(): AppData {
             ],
             tasks: [],
         };
-        saveData(defaultData);
+        await saveAppData(defaultData);
         return defaultData;
     }
 
-    return JSON.parse(data);
+    return data;
 }
 
-// Save all data to LocalStorage
-export function saveData(data: AppData): void {
+// Save all data natively to IndexedDB
+export async function saveAppData(data: AppData): Promise<void> {
     if (typeof window === 'undefined') return;
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+    await idbSet(STORAGE_KEY, data);
 }
 
 // Category CRUD
-export function getCategories(): Category[] {
-    return getData().categories.sort((a, b) => a.order - b.order);
+export async function getCategories(): Promise<Category[]> {
+    const data = await getAppData();
+    return data.categories.sort((a, b) => a.order - b.order);
 }
 
-export function addCategory(name: string): Category {
-    const data = getData();
+export async function addCategory(name: string): Promise<Category> {
+    const data = await getAppData();
     const maxOrder = Math.max(...data.categories.map(c => c.order), -1);
     const colorIndex = data.categories.length % CATEGORY_COLORS.length;
     const newCategory: Category = {
@@ -58,35 +160,35 @@ export function addCategory(name: string): Category {
         createdAt: new Date().toISOString(),
     };
     data.categories.push(newCategory);
-    saveData(data);
+    await saveAppData(data);
     return newCategory;
 }
 
-export function updateCategory(id: string, updates: Partial<Category>): Category | null {
-    const data = getData();
+export async function updateCategory(id: string, updates: Partial<Category>): Promise<Category | null> {
+    const data = await getAppData();
     const index = data.categories.findIndex(c => c.id === id);
     if (index === -1) return null;
 
     data.categories[index] = { ...data.categories[index], ...updates };
-    saveData(data);
+    await saveAppData(data);
     return data.categories[index];
 }
 
-export function deleteCategory(id: string): boolean {
-    const data = getData();
+export async function deleteCategory(id: string): Promise<boolean> {
+    const data = await getAppData();
     const index = data.categories.findIndex(c => c.id === id);
     if (index === -1) return false;
 
     // Delete all tasks in this category
     data.tasks = data.tasks.filter(t => t.categoryId !== id);
     data.categories.splice(index, 1);
-    saveData(data);
+    await saveAppData(data);
     return true;
 }
 
 // Task CRUD
-export function getTasks(categoryId?: string): Task[] {
-    const data = getData();
+export async function getTasks(categoryId?: string): Promise<Task[]> {
+    const data = await getAppData();
     let tasks = data.tasks;
     if (categoryId) {
         tasks = tasks.filter(t => t.categoryId === categoryId);
@@ -95,8 +197,8 @@ export function getTasks(categoryId?: string): Task[] {
 }
 
 // Get all unique tags from all tasks
-export function getAllTags(): string[] {
-    const data = getData();
+export async function getAllTags(): Promise<string[]> {
+    const data = await getAppData();
     const tagSet = new Set<string>();
     data.tasks.forEach(task => {
         if (task.tags) {
@@ -106,8 +208,8 @@ export function getAllTags(): string[] {
     return Array.from(tagSet).sort();
 }
 
-export function addTask(categoryId: string, title: string, dueDate?: string | null, options: Partial<Task> = {}): Task {
-    const data = getData();
+export async function addTask(categoryId: string, title: string, dueDate?: string | null, options: Partial<Task> = {}): Promise<Task> {
+    const data = await getAppData();
     const categoryTasks = data.tasks.filter(t => t.categoryId === categoryId);
     const maxOrder = Math.max(...categoryTasks.map(t => t.order), -1);
 
@@ -130,68 +232,66 @@ export function addTask(categoryId: string, title: string, dueDate?: string | nu
     };
 
     data.tasks.push(newTask);
-    saveData(data);
 
     // Auto-sort by due date after adding
-    sortTasksByDate(categoryId);
+    await _asyncSortTasksByDate(data, categoryId);
+    await saveAppData(data);
 
     return newTask;
 }
 
-export function updateTask(id: string, updates: Partial<Task>): Task | null {
-    const data = getData();
+export async function updateTask(id: string, updates: Partial<Task>): Promise<Task | null> {
+    const data = await getAppData();
     const index = data.tasks.findIndex(t => t.id === id);
     if (index === -1) return null;
 
     data.tasks[index] = { ...data.tasks[index], ...updates };
-    saveData(data);
+    await saveAppData(data);
     return data.tasks[index];
 }
 
-export function deleteTask(id: string): boolean {
-    const data = getData();
+export async function deleteTask(id: string): Promise<boolean> {
+    const data = await getAppData();
     const index = data.tasks.findIndex(t => t.id === id);
     if (index === -1) return false;
 
     data.tasks.splice(index, 1);
-    saveData(data);
+    await saveAppData(data);
     return true;
 }
 
-export function restoreTask(task: Task): void {
-    const data = getData();
+export async function restoreTask(task: Task): Promise<void> {
+    const data = await getAppData();
     data.tasks.push(task);
-    saveData(data);
+    await saveAppData(data);
 }
 
-export function toggleTaskComplete(id: string): Task | null {
-    const data = getData();
+export async function toggleTaskComplete(id: string): Promise<Task | null> {
+    const data = await getAppData();
     const index = data.tasks.findIndex(t => t.id === id);
     if (index === -1) return null;
 
     const newCompleted = !data.tasks[index].completed;
     data.tasks[index].completed = newCompleted;
     data.tasks[index].completedAt = newCompleted ? new Date().toISOString() : null;
-    saveData(data);
+    await saveAppData(data);
     return data.tasks[index];
 }
 
 // Reorder tasks
-export function reorderTasks(categoryId: string, taskIds: string[]): void {
-    const data = getData();
+export async function reorderTasks(categoryId: string, taskIds: string[]): Promise<void> {
+    const data = await getAppData();
     taskIds.forEach((id, index) => {
         const taskIndex = data.tasks.findIndex(t => t.id === id);
         if (taskIndex !== -1) {
             data.tasks[taskIndex].order = index;
         }
     });
-    saveData(data);
+    await saveAppData(data);
 }
 
-// Sort tasks by date (only non-completed tasks)
-export function sortTasksByDate(categoryId: string): void {
-    const data = getData();
-
+// Internal helper for auto-sorting without extraneous db round trips
+async function _asyncSortTasksByDate(data: AppData, categoryId: string): Promise<void> {
     // Only sort non-completed tasks
     const activeTasks = data.tasks
         .filter(t => t.categoryId === categoryId && !t.completed)
@@ -209,37 +309,83 @@ export function sortTasksByDate(categoryId: string): void {
             data.tasks[taskIndex].order = index;
         }
     });
+}
 
-    saveData(data);
+// Sort tasks by date (only non-completed tasks)
+export async function sortTasksByDate(categoryId: string): Promise<void> {
+    const data = await getAppData();
+    await _asyncSortTasksByDate(data, categoryId);
+    await saveAppData(data);
 }
 
 // Export data as JSON (includes all data including notes, settings, layout)
-export function exportData(): string {
-    const data = getData();
-    const quickLinks = getQuickLinks();
-    const notes = getNotes();
+export async function exportData(): Promise<string> {
+    const data = await getAppData();
+    const labels = await getLabels();
+    const quickLinks = await getQuickLinks();
+    const notes = await getNotes();
+    const teamMembers = await getTeamMembers();
+    const businessTrips = await getBusinessTrips();
+    const tripRecords = await getTripRecords();
+    const nameResolutions = getNameResolutions();
     const theme = getTheme();
     const layoutState = getLayoutState();
     const layoutPresets = getAllLayoutPresets();
 
     // Calendar settings (read directly from localStorage as it's not managed fully in storage.ts)
-    const calendarSettings = typeof window !== 'undefined' ? localStorage.getItem('calendar-settings') : null;
+    const calendarSettings = typeof window !== 'undefined' ? getStorageItem('calendar-settings') : null;
+    const tripDestinationMappings = typeof window !== 'undefined' ? getStorageItem('tripDestinationMappings') : null;
+
+    const UI_STATE_KEYS = [
+        'calendar-settings',
+        'calendar-collapsed-weeks',
+        'search-history',
+        'sidebar_calendar_expanded',
+        'sidebar_quicklinks_expanded',
+        'sidebar_pinnedmemos_expanded',
+        'team-member-custom-columns',
+        'team-member-visible-columns',
+        'tripViewMode',
+        'tripCategoryColors',
+        'ganttViewPrefs',
+        'tripRecordColumns',
+        'tripRecordHeaders',
+        'local-tasks-current-view',
+        'local-tasks-current-month',
+        'local-tasks-selected-date',
+        'local-tasks-selected-category-ids',
+    ] as const;
+
+    const uiState: Record<string, string> = {};
+    if (typeof window !== 'undefined') {
+        UI_STATE_KEYS.forEach((key) => {
+            const value = getStorageItem(key);
+            if (value !== null) uiState[key] = value;
+        });
+    }
 
     return JSON.stringify({
-        version: 2,
+        version: 3,
         timestamp: new Date().toISOString(),
         data,
+        labels,
         quickLinks,
         notes,
+        teamMembers,
+        businessTrips,
+        tripRecords,
+        nameResolutions,
         theme,
         layoutState,
         layoutPresets,
-        calendarSettings: calendarSettings ? JSON.parse(calendarSettings) : null
+        calendarSettings: calendarSettings ? JSON.parse(calendarSettings) : null,
+        tripDestinationMappings: tripDestinationMappings ? JSON.parse(tripDestinationMappings) : null,
+        uiState,
     }, null, 2);
 }
 
 // Import data from JSON
-export function importData(jsonString: string): boolean {
+export async function importData(jsonString: string): Promise<boolean> {
     try {
         const parsed = JSON.parse(jsonString);
 
@@ -247,10 +393,10 @@ export function importData(jsonString: string): boolean {
 
         // 1. Core Data (Tasks & Categories)
         if (parsed.data && parsed.data.categories) {
-            saveData(parsed.data);
+            await saveAppData(parsed.data);
         } else if (Array.isArray(parsed.categories) && Array.isArray(parsed.tasks)) {
             // Legacy format support
-            saveData(parsed as AppData);
+            await saveAppData(parsed as AppData);
         }
 
         // 2. Quick Links
@@ -263,24 +409,79 @@ export function importData(jsonString: string): boolean {
             saveNotes(parsed.notes);
         }
 
-        // 4. Theme
+        // 4. Labels
+        if (parsed.labels) {
+            saveLabels(parsed.labels);
+        }
+
+        // 5. Team Members
+        if (parsed.teamMembers) {
+            saveTeamMembers(parsed.teamMembers);
+        }
+
+        // 6. Trips / Attendance DB
+        if (parsed.businessTrips) {
+            saveBusinessTrips(parsed.businessTrips);
+        }
+        if (parsed.tripRecords) {
+            saveTripRecords(parsed.tripRecords);
+        }
+        if (parsed.nameResolutions) {
+            setStorageItem(NAME_RESOLUTION_KEY, JSON.stringify(parsed.nameResolutions));
+        }
+        if (parsed.tripDestinationMappings) {
+            setStorageItem('tripDestinationMappings', JSON.stringify(parsed.tripDestinationMappings));
+        }
+
+        // 7. Theme
         if (parsed.theme) {
             setTheme(parsed.theme);
         }
 
-        // 5. Layout State
+        // 8. Layout State
         if (parsed.layoutState) {
-            localStorage.setItem(LAYOUT_STATE_KEY, JSON.stringify(parsed.layoutState));
+            setStorageItem(LAYOUT_STATE_KEY, JSON.stringify(parsed.layoutState));
         }
 
-        // 6. Layout Presets
+        // 9. Layout Presets
         if (parsed.layoutPresets) {
-            localStorage.setItem(LAYOUT_PRESETS_KEY, JSON.stringify(parsed.layoutPresets));
+            setStorageItem(LAYOUT_PRESETS_KEY, JSON.stringify(parsed.layoutPresets));
         }
 
-        // 7. Calendar Settings
+        // 10. Calendar Settings
         if (parsed.calendarSettings) {
-            localStorage.setItem('calendar-settings', JSON.stringify(parsed.calendarSettings));
+            setStorageItem('calendar-settings', JSON.stringify(parsed.calendarSettings));
+        }
+
+        // 11. UI State Snapshot (current page/view/filter states)
+        if (parsed.uiState && typeof parsed.uiState === 'object') {
+            const UI_STATE_KEYS = [
+                'calendar-settings',
+                'calendar-collapsed-weeks',
+                'search-history',
+                'sidebar_calendar_expanded',
+                'sidebar_quicklinks_expanded',
+                'sidebar_pinnedmemos_expanded',
+                'team-member-custom-columns',
+                'team-member-visible-columns',
+                'tripViewMode',
+                'tripCategoryColors',
+                'ganttViewPrefs',
+                'tripRecordColumns',
+                'tripRecordHeaders',
+                'local-tasks-current-view',
+                'local-tasks-current-month',
+                'local-tasks-selected-date',
+                'local-tasks-selected-category-ids',
+            ] as const;
+
+            UI_STATE_KEYS.forEach((key) => removeStorageItem(key));
+            UI_STATE_KEYS.forEach((key) => {
+                const value = parsed.uiState[key];
+                if (typeof value === 'string') {
+                    setStorageItem(key, value);
+                }
+            });
         }
 
         return true;
@@ -290,25 +491,25 @@ export function importData(jsonString: string): boolean {
     }
 }
 
-// Quick Links - stored separately
+// Quick Links - moved to IndexedDB
 const QUICK_LINKS_KEY = 'local-tasks-quick-links';
 
 import { QuickLink } from './types';
 
-export function getQuickLinks(): QuickLink[] {
+export async function getQuickLinks(): Promise<QuickLink[]> {
     if (typeof window === 'undefined') return [];
-    const data = localStorage.getItem(QUICK_LINKS_KEY);
+    const data = await idbGet<QuickLink[]>(QUICK_LINKS_KEY);
     if (!data) return [];
-    return JSON.parse(data).sort((a: QuickLink, b: QuickLink) => a.order - b.order);
+    return data.sort((a: QuickLink, b: QuickLink) => a.order - b.order);
 }
 
-export function saveQuickLinks(links: QuickLink[]): void {
+export async function saveQuickLinks(links: QuickLink[]): Promise<void> {
     if (typeof window === 'undefined') return;
-    localStorage.setItem(QUICK_LINKS_KEY, JSON.stringify(links));
+    await idbSet(QUICK_LINKS_KEY, links);
 }
 
-export function addQuickLink(name: string, url: string, options: Partial<QuickLink> = {}): QuickLink {
-    const links = getQuickLinks();
+export async function addQuickLink(name: string, url: string, options: Partial<QuickLink> = {}): Promise<QuickLink> {
+    const links = await getQuickLinks();
     const maxOrder = Math.max(...links.map(l => l.order), -1);
     const newLink: QuickLink = {
         id: generateId(),
@@ -318,37 +519,37 @@ export function addQuickLink(name: string, url: string, options: Partial<QuickLi
         ...options
     };
     links.push(newLink);
-    saveQuickLinks(links);
+    await saveQuickLinks(links);
     return newLink;
 }
 
-export function updateQuickLink(id: string, updates: Partial<QuickLink>): QuickLink | null {
-    const links = getQuickLinks();
+export async function updateQuickLink(id: string, updates: Partial<QuickLink>): Promise<QuickLink | null> {
+    const links = await getQuickLinks();
     const index = links.findIndex(l => l.id === id);
     if (index === -1) return null;
     links[index] = { ...links[index], ...updates };
-    saveQuickLinks(links);
+    await saveQuickLinks(links);
     return links[index];
 }
 
-export function deleteQuickLink(id: string): boolean {
-    const links = getQuickLinks();
+export async function deleteQuickLink(id: string): Promise<boolean> {
+    const links = await getQuickLinks();
     const index = links.findIndex(l => l.id === id);
     if (index === -1) return false;
     links.splice(index, 1);
-    saveQuickLinks(links);
+    await saveQuickLinks(links);
     return true;
 }
 
-export function reorderQuickLinks(linkIds: string[]): void {
-    const links = getQuickLinks();
+export async function reorderQuickLinks(linkIds: string[]): Promise<void> {
+    const links = await getQuickLinks();
     linkIds.forEach((id, index) => {
         const linkIndex = links.findIndex(l => l.id === id);
         if (linkIndex !== -1) {
             links[linkIndex].order = index;
         }
     });
-    saveQuickLinks(links);
+    await saveQuickLinks(links);
 }
 
 // Theme settings
@@ -358,12 +559,12 @@ export type Theme = 'light' | 'dark';
 
 export function getTheme(): Theme {
     if (typeof window === 'undefined') return 'light';
-    return (localStorage.getItem(THEME_KEY) as Theme) || 'light';
+    return (getStorageItem(THEME_KEY) as Theme) || 'light';
 }
 
 export function setTheme(theme: Theme): void {
     if (typeof window === 'undefined') return;
-    localStorage.setItem(THEME_KEY, theme);
+    setStorageItem(THEME_KEY, theme);
 }
 
 // Layout settings
@@ -392,7 +593,7 @@ const DEFAULT_LAYOUT_STATE: LayoutState = {
 // Get current layout state (auto-saved)
 export function getLayoutState(): LayoutState {
     if (typeof window === 'undefined') return DEFAULT_LAYOUT_STATE;
-    const data = localStorage.getItem(LAYOUT_STATE_KEY);
+    const data = getStorageItem(LAYOUT_STATE_KEY);
     if (!data) return DEFAULT_LAYOUT_STATE;
     try {
         return { ...DEFAULT_LAYOUT_STATE, ...JSON.parse(data) };
@@ -406,7 +607,7 @@ export function saveLayoutState(state: Partial<LayoutState>): void {
     if (typeof window === 'undefined') return;
     const current = getLayoutState();
     const updated = { ...current, ...state };
-    localStorage.setItem(LAYOUT_STATE_KEY, JSON.stringify(updated));
+    setStorageItem(LAYOUT_STATE_KEY, JSON.stringify(updated));
 }
 
 // Layout presets (5 slots: index 0-4 for Ctrl+6~0)
@@ -417,7 +618,7 @@ export interface LayoutPreset extends LayoutState {
 
 export function getLayoutPreset(index: number): LayoutPreset | null {
     if (typeof window === 'undefined' || index < 0 || index > 4) return null;
-    const data = localStorage.getItem(LAYOUT_PRESETS_KEY);
+    const data = getStorageItem(LAYOUT_PRESETS_KEY);
     if (!data) return null;
     try {
         const presets: (LayoutPreset | null)[] = JSON.parse(data);
@@ -430,23 +631,23 @@ export function getLayoutPreset(index: number): LayoutPreset | null {
 export function saveLayoutPreset(index: number, state: LayoutState, name?: string): LayoutPreset | null {
     if (typeof window === 'undefined' || index < 0 || index > 4) return null;
 
-    const data = localStorage.getItem(LAYOUT_PRESETS_KEY);
+    const data = getStorageItem(LAYOUT_PRESETS_KEY);
     const presets: (LayoutPreset | null)[] = data ? JSON.parse(data) : [null, null, null, null, null];
 
     const preset: LayoutPreset = {
         ...state,
-        name: name || `프리셋 ${index + 1}`,
+        name: name || `?꾨━??${index + 1}`,
         savedAt: new Date().toISOString(),
     };
 
     presets[index] = preset;
-    localStorage.setItem(LAYOUT_PRESETS_KEY, JSON.stringify(presets));
+    setStorageItem(LAYOUT_PRESETS_KEY, JSON.stringify(presets));
     return preset;
 }
 
 export function getAllLayoutPresets(): (LayoutPreset | null)[] {
     if (typeof window === 'undefined') return [null, null, null, null, null];
-    const data = localStorage.getItem(LAYOUT_PRESETS_KEY);
+    const data = getStorageItem(LAYOUT_PRESETS_KEY);
     if (!data) return [null, null, null, null, null];
     try {
         return JSON.parse(data);
@@ -469,24 +670,24 @@ const NOTES_KEY = 'local-tasks-notes';
 
 import { Note } from './types';
 
-export function getNotes(): Note[] {
+export async function getNotes(): Promise<Note[]> {
     if (typeof window === 'undefined') return [];
-    const data = localStorage.getItem(NOTES_KEY);
+    const data = await idbGet<Note[]>(NOTES_KEY);
     if (!data) return [];
-    return JSON.parse(data).sort((a: Note, b: Note) => {
+    return data.sort((a: Note, b: Note) => {
         // Pinned notes first, then by order
         if (a.isPinned !== b.isPinned) return a.isPinned ? -1 : 1;
         return a.order - b.order;
     });
 }
 
-function saveNotes(notes: Note[]): void {
+async function saveNotes(notes: Note[]): Promise<void> {
     if (typeof window === 'undefined') return;
-    localStorage.setItem(NOTES_KEY, JSON.stringify(notes));
+    await idbSet(NOTES_KEY, notes);
 }
 
-export function addNote(title: string, content: string = '', color: string = '#ffffff'): Note {
-    const notes = getNotes();
+export async function addNote(title: string, content: string = '', color: string = '#ffffff'): Promise<Note> {
+    const notes = await getNotes();
     const maxOrder = Math.max(...notes.map(n => n.order), -1);
     const newNote: Note = {
         id: generateId(),
@@ -499,82 +700,82 @@ export function addNote(title: string, content: string = '', color: string = '#f
         createdAt: new Date().toISOString(),
     };
     notes.push(newNote);
-    saveNotes(notes);
+    await saveNotes(notes);
     return newNote;
 }
 
-export function updateNote(id: string, updates: Partial<Note>): Note | null {
-    const notes = getNotes();
+export async function updateNote(id: string, updates: Partial<Note>): Promise<Note | null> {
+    const notes = await getNotes();
     const index = notes.findIndex(n => n.id === id);
     if (index === -1) return null;
     notes[index] = { ...notes[index], ...updates };
-    saveNotes(notes);
+    await saveNotes(notes);
     return notes[index];
 }
 
-export function deleteNote(id: string): boolean {
-    const notes = getNotes();
+export async function deleteNote(id: string): Promise<boolean> {
+    const notes = await getNotes();
     const index = notes.findIndex(n => n.id === id);
     if (index === -1) return false;
     notes.splice(index, 1);
-    saveNotes(notes);
+    await saveNotes(notes);
     return true;
 }
 
-export function reorderNotes(noteIds: string[]): void {
-    const notes = getNotes();
+export async function reorderNotes(noteIds: string[]): Promise<void> {
+    const notes = await getNotes();
     noteIds.forEach((id, index) => {
         const noteIndex = notes.findIndex(n => n.id === id);
         if (noteIndex !== -1) {
             notes[noteIndex].order = index;
         }
     });
-    saveNotes(notes);
+    await saveNotes(notes);
 }
 // Labels storage
 const LABELS_KEY = 'local-tasks-labels';
 
 import { Label } from './types';
 
-export function getLabels(): Label[] {
+export async function getLabels(): Promise<Label[]> {
     if (typeof window === 'undefined') return [];
-    const data = localStorage.getItem(LABELS_KEY);
+    const data = await idbGet<Label[]>(LABELS_KEY);
     if (!data) return [];
-    return JSON.parse(data).sort((a: Label, b: Label) => a.name.localeCompare(b.name));
+    return data.sort((a: Label, b: Label) => a.name.localeCompare(b.name));
 }
 
-function saveLabels(labels: Label[]): void {
+async function saveLabels(labels: Label[]): Promise<void> {
     if (typeof window === 'undefined') return;
-    localStorage.setItem(LABELS_KEY, JSON.stringify(labels));
+    await idbSet(LABELS_KEY, labels);
 }
 
-export function addLabel(name: string): Label {
-    const labels = getLabels();
+export async function addLabel(name: string): Promise<Label> {
+    const labels = await getLabels();
     const newLabel: Label = {
         id: generateId(),
         name,
     };
     labels.push(newLabel);
-    saveLabels(labels);
+    await saveLabels(labels);
     return newLabel;
 }
 
-export function updateLabel(id: string, name: string): Label | null {
-    const labels = getLabels();
+export async function updateLabel(id: string, name: string): Promise<Label | null> {
+    const labels = await getLabels();
     const index = labels.findIndex(l => l.id === id);
     if (index === -1) return null;
     labels[index] = { ...labels[index], name };
-    saveLabels(labels);
+    await saveLabels(labels);
     return labels[index];
 }
 
-export function deleteLabel(id: string): boolean {
-    const labels = getLabels();
+export async function deleteLabel(id: string): Promise<boolean> {
+    const labels = await getLabels();
     const index = labels.findIndex(l => l.id === id);
     if (index === -1) return false;
 
     // Also remove this label from getAllNotes
-    const notes = getNotes();
+    const notes = await getNotes();
     let notesChanged = false;
     notes.forEach(note => {
         if (note.labels?.includes(id)) {
@@ -584,11 +785,11 @@ export function deleteLabel(id: string): boolean {
     });
 
     if (notesChanged) {
-        saveNotes(notes);
+        await saveNotes(notes);
     }
 
     labels.splice(index, 1);
-    saveLabels(labels);
+    await saveLabels(labels);
     return true;
 }
 
@@ -597,20 +798,20 @@ const TEAM_MEMBERS_KEY = 'local-tasks-team-members';
 
 import { TeamMember } from './types';
 
-export function getTeamMembers(): TeamMember[] {
+export async function getTeamMembers(): Promise<TeamMember[]> {
     if (typeof window === 'undefined') return [];
-    const data = localStorage.getItem(TEAM_MEMBERS_KEY);
+    const data = await idbGet<TeamMember[]>(TEAM_MEMBERS_KEY);
     if (!data) return [];
-    return JSON.parse(data).sort((a: TeamMember, b: TeamMember) => a.name.localeCompare(b.name, 'ko'));
+    return data.sort((a: TeamMember, b: TeamMember) => a.name.localeCompare(b.name, 'ko'));
 }
 
-export function saveTeamMembers(members: TeamMember[]): void {
+export async function saveTeamMembers(members: TeamMember[]): Promise<void> {
     if (typeof window === 'undefined') return;
-    localStorage.setItem(TEAM_MEMBERS_KEY, JSON.stringify(members));
+    await idbSet(TEAM_MEMBERS_KEY, members);
 }
 
-export function addTeamMember(member: Omit<TeamMember, 'id' | 'createdAt' | 'updatedAt'>): TeamMember {
-    const members = getTeamMembers();
+export async function addTeamMember(member: Omit<TeamMember, 'id' | 'createdAt' | 'updatedAt'>): Promise<TeamMember> {
+    const members = await getTeamMembers();
     const now = new Date().toISOString();
     const newMember: TeamMember = {
         ...member,
@@ -619,45 +820,44 @@ export function addTeamMember(member: Omit<TeamMember, 'id' | 'createdAt' | 'upd
         updatedAt: now,
     };
     members.push(newMember);
-    saveTeamMembers(members);
+    await saveTeamMembers(members);
     return newMember;
 }
 
-export function updateTeamMember(id: string, updates: Partial<TeamMember>): TeamMember | null {
-    const members = getTeamMembers();
+export async function updateTeamMember(id: string, updates: Partial<TeamMember>): Promise<TeamMember | null> {
+    const members = await getTeamMembers();
     const index = members.findIndex(m => m.id === id);
     if (index === -1) return null;
     members[index] = { ...members[index], ...updates, updatedAt: new Date().toISOString() };
-    saveTeamMembers(members);
+    await saveTeamMembers(members);
     return members[index];
 }
 
-export function deleteTeamMember(id: string): boolean {
-    const members = getTeamMembers();
+export async function deleteTeamMember(id: string): Promise<boolean> {
+    const members = await getTeamMembers();
     const index = members.findIndex(m => m.id === id);
     if (index === -1) return false;
     members.splice(index, 1);
-    saveTeamMembers(members);
+    await saveTeamMembers(members);
     return true;
-
 }
 
 // Business Trip Storage
 const TRIP_STORAGE_KEY = 'business-trips';
 
-export function getBusinessTrips(): import('./types').BusinessTrip[] {
+export async function getBusinessTrips(): Promise<import('./types').BusinessTrip[]> {
     if (typeof window === 'undefined') return [];
-    const stored = localStorage.getItem(TRIP_STORAGE_KEY);
-    return stored ? JSON.parse(stored) : [];
+    const stored = await idbGet<import('./types').BusinessTrip[]>(TRIP_STORAGE_KEY);
+    return stored ? stored : [];
 }
 
-export function saveBusinessTrips(trips: import('./types').BusinessTrip[]) {
+export async function saveBusinessTrips(trips: import('./types').BusinessTrip[]): Promise<void> {
     if (typeof window === 'undefined') return;
-    localStorage.setItem(TRIP_STORAGE_KEY, JSON.stringify(trips));
+    await idbSet(TRIP_STORAGE_KEY, trips);
 }
 
-export function addBusinessTrip(trip: Omit<import('./types').BusinessTrip, 'id' | 'createdAt' | 'updatedAt'>) {
-    const trips = getBusinessTrips();
+export async function addBusinessTrip(trip: Omit<import('./types').BusinessTrip, 'id' | 'createdAt' | 'updatedAt'>): Promise<import('./types').BusinessTrip> {
+    const trips = await getBusinessTrips();
     const now = new Date().toISOString();
     const newTrip: import('./types').BusinessTrip = {
         ...trip,
@@ -666,12 +866,70 @@ export function addBusinessTrip(trip: Omit<import('./types').BusinessTrip, 'id' 
         updatedAt: now,
     };
     trips.push(newTrip);
-    saveBusinessTrips(trips);
+    await saveBusinessTrips(trips);
     return newTrip;
 }
 
-export function deleteBusinessTrip(id: string) {
-    const trips = getBusinessTrips();
+export async function deleteBusinessTrip(id: string): Promise<void> {
+    const trips = await getBusinessTrips();
     const filtered = trips.filter(t => t.id !== id);
-    saveBusinessTrips(filtered);
+    await saveBusinessTrips(filtered);
 }
+
+// Trip Record Storage (Manual DB)
+const TRIP_RECORD_STORAGE_KEY = 'trip-records';
+
+export async function getTripRecords(): Promise<import('./types').TripRecord[]> {
+    if (typeof window === 'undefined') return [];
+    const stored = await idbGet<import('./types').TripRecord[]>(TRIP_RECORD_STORAGE_KEY);
+    return stored ? stored : [];
+}
+
+export async function saveTripRecords(records: import('./types').TripRecord[]): Promise<void> {
+    if (typeof window === 'undefined') return;
+    await idbSet(TRIP_RECORD_STORAGE_KEY, records);
+}
+
+export async function addTripRecord(record: Omit<import('./types').TripRecord, 'id' | 'createdAt' | 'updatedAt'>): Promise<import('./types').TripRecord> {
+    const records = await getTripRecords();
+    const now = new Date().toISOString();
+    const newRecord: import('./types').TripRecord = {
+        ...record,
+        id: generateId(),
+        createdAt: now,
+        updatedAt: now,
+    };
+    records.push(newRecord);
+    await saveTripRecords(records);
+    return newRecord;
+}
+
+export async function deleteTripRecord(id: string): Promise<void> {
+    const records = await getTripRecords();
+    const filtered = records.filter(r => r.id !== id);
+    await saveTripRecords(filtered);
+}
+
+// Name Resolution Storage (Name -> KnoxID)
+const NAME_RESOLUTION_KEY = 'trip-name-resolution';
+
+export function getNameResolutions(): Record<string, string> {
+    if (typeof window === 'undefined') return {};
+    const stored = getStorageItem(NAME_RESOLUTION_KEY);
+    return stored ? JSON.parse(stored) : {};
+}
+
+export function saveNameResolution(name: string, knoxId: string) {
+    const resolutions = getNameResolutions();
+    resolutions[name] = knoxId;
+    if (typeof window === 'undefined') return;
+    setStorageItem(NAME_RESOLUTION_KEY, JSON.stringify(resolutions));
+}
+
+export function removeNameResolution(name: string) {
+    const resolutions = getNameResolutions();
+    delete resolutions[name];
+    if (typeof window === 'undefined') return;
+    setStorageItem(NAME_RESOLUTION_KEY, JSON.stringify(resolutions));
+}
+

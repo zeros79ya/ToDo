@@ -2,7 +2,8 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { Note, NOTE_COLORS, Label } from '@/lib/types';
-import { getNotes, addNote, updateNote, deleteNote, getLabels, addLabel, updateLabel, deleteLabel } from '@/lib/storage';
+import { addLabel, updateLabel, deleteLabel } from '@/lib/storage';
+import { useData } from '@/providers/data-provider';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -28,6 +29,7 @@ interface KeepViewProps {
 }
 
 export function KeepView({ selectedNoteId, onNoteSelected, onNotesChange }: KeepViewProps = {}) {
+    const { notes: contextNotes, labels: contextLabels, addNote, updateNote, deleteNote, refreshData } = useData();
     const [notes, setNotes] = useState<Note[]>([]);
     const [labels, setLabels] = useState<Label[]>([]);
     const [selectedLabelId, setSelectedLabelId] = useState<string | null>(null);
@@ -54,13 +56,12 @@ export function KeepView({ selectedNoteId, onNoteSelected, onNotesChange }: Keep
     const editNoteEditorRef = useRef<HTMLDivElement>(null);
 
     useEffect(() => {
-        loadNotes();
-        loadLabels();
-    }, []);
+        setNotes(contextNotes);
+    }, [contextNotes]);
 
-    const loadLabels = () => {
-        setLabels(getLabels());
-    };
+    useEffect(() => {
+        setLabels(contextLabels);
+    }, [contextLabels]);
 
     // Open edit dialog when selectedNoteId is provided (from sidebar pinned memo click)
     useEffect(() => {
@@ -129,22 +130,19 @@ export function KeepView({ selectedNoteId, onNoteSelected, onNotesChange }: Keep
         return () => window.removeEventListener('keydown', handleKeyDown);
     }, [editingNote, isLabelManagerOpen]);
 
-    const loadNotes = () => {
-        setNotes(getNotes());
-    };
 
-    const handleAddNote = () => {
+
+    const handleAddNote = async () => {
         if (newTitle.trim() || newContent.trim()) {
-            const note = addNote(newTitle.trim() || '제목 없음', newContent.trim());
+            const note = await addNote(newTitle.trim() || '제목 없음', newContent.trim());
             if (newNoteLabels.length > 0) {
-                updateNote(note.id, { labels: newNoteLabels });
+                await updateNote(note.id, { labels: newNoteLabels });
             }
             setNewTitle('');
             setNewContent('');
             setNewNoteLabels([]);
             setIsAdding(false);
             setIsCreateDialogOpen(false);
-            loadNotes();
             onNotesChange?.();
         }
     };
@@ -166,16 +164,15 @@ export function KeepView({ selectedNoteId, onNoteSelected, onNotesChange }: Keep
         }
     };
 
-    const handleUpdateNote = () => {
+    const handleUpdateNote = async () => {
         if (editingNote) {
-            updateNote(editingNote.id, {
+            await updateNote(editingNote.id, {
                 title: editingNote.title,
                 content: editingNote.content,
                 color: editingNote.color,
                 labels: editingNote.labels,
             });
             setEditingNote(null);
-            loadNotes();
             onNotesChange?.();
         }
     };
@@ -189,60 +186,53 @@ export function KeepView({ selectedNoteId, onNoteSelected, onNotesChange }: Keep
         }
     };
 
-    const handleTogglePin = (note: Note) => {
-        updateNote(note.id, { isPinned: !note.isPinned });
-        loadNotes();
+    const handleTogglePin = async (note: Note) => {
+        await updateNote(note.id, { isPinned: !note.isPinned });
         onNotesChange?.();
     };
 
-    const handleToggleFavorite = (note: Note) => {
-        updateNote(note.id, { isFavorite: !note.isFavorite });
-        loadNotes();
+    const handleToggleFavorite = async (note: Note) => {
+        await updateNote(note.id, { isFavorite: !note.isFavorite });
         onNotesChange?.();
     };
 
-    const handleToggleArchive = (note: Note) => {
-        updateNote(note.id, { isArchived: !note.isArchived });
-        loadNotes();
+    const handleToggleArchive = async (note: Note) => {
+        await updateNote(note.id, { isArchived: !note.isArchived });
         onNotesChange?.();
     };
 
-    const handleChangeColor = (note: Note, color: string) => {
-        updateNote(note.id, { color });
-        loadNotes();
+    const handleChangeColor = async (note: Note, color: string) => {
+        await updateNote(note.id, { color });
     };
 
-    const handleDelete = (id: string) => {
-        deleteNote(id);
-        loadNotes();
+    const handleDelete = async (id: string) => {
+        await deleteNote(id);
         onNotesChange?.();
     };
 
     // Label Management Functions
-    const handleAddLabel = () => {
+    const handleAddLabel = async () => {
         if (newLabelName.trim()) {
-            addLabel(newLabelName.trim());
+            await addLabel(newLabelName.trim());
             setNewLabelName('');
-            loadLabels();
+            refreshData();
         }
     };
 
-    const handleUpdateLabel = (id: string) => {
+    const handleUpdateLabel = async (id: string) => {
         if (editingLabelName.trim()) {
-            updateLabel(id, editingLabelName.trim());
+            await updateLabel(id, editingLabelName.trim());
             setEditingLabelId(null);
             setEditingLabelName('');
-            loadLabels();
-            loadNotes(); // Refresh notes to reflect label name changes if we store names (we store IDs, but UI update needed)
+            refreshData(); // Refresh notes to reflect label name changes if we store names (we store IDs, but UI update needed)
         }
     };
 
-    const handleDeleteLabel = (id: string) => {
+    const handleDeleteLabel = async (id: string) => {
         if (window.confirm('이 라벨을 삭제하시겠습니까?')) {
-            deleteLabel(id);
+            await deleteLabel(id);
             if (selectedLabelId === id) setSelectedLabelId(null);
-            loadLabels();
-            loadNotes();
+            refreshData();
         }
     };
 

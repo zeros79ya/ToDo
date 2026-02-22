@@ -28,8 +28,8 @@ export function ImportExportDialog({
     const [importStatus, setImportStatus] = React.useState<'idle' | 'success' | 'error'>('idle');
     const [errorMessage, setErrorMessage] = React.useState('');
 
-    const handleExport = () => {
-        const data = exportData();
+    const handleExport = async () => {
+        const data = await exportData();
         const blob = new Blob([data], { type: 'application/json' });
         const url = URL.createObjectURL(blob);
         const link = document.createElement('a');
@@ -48,7 +48,7 @@ export function ImportExportDialog({
 
         try {
             const text = await file.text();
-            const success = importData(text);
+            const success = await importData(text);
             if (success) {
                 setImportStatus('success');
                 onDataChange();

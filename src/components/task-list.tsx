@@ -563,7 +563,10 @@ function AnimatedTaskItem({
                         variant="ghost"
                         size="sm"
                         className={`h-8 w-8 p-0 opacity-0 group-hover:opacity-100 ${task.isPinned ? 'opacity-100 text-yellow-500' : 'text-gray-400 hover:text-yellow-500 hover:bg-yellow-50'}`}
-                        onClick={() => onTogglePin(task)}
+                        onClick={(e) => {
+                            e.stopPropagation();
+                            onTogglePin(task);
+                        }}
                     >
                         <Pin className={`h-4 w-4 ${task.isPinned ? 'fill-current' : ''}`} />
                     </Button>
@@ -756,6 +759,10 @@ export function TaskList({ category, categories, tasks, onTasksChange, collectio
     // Filter tasks based on search, tag, and categorych query
     const filteredTasks = React.useMemo(() => {
         let result = tasks;
+
+        // Filter out team schedules from the task list. 
+        // We only want to show manually added tasks (or old tasks without a source).
+        result = result.filter(task => task.source !== 'team');
 
         // Filter by today only
         if (showTodayOnly) {

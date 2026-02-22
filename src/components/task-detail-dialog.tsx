@@ -64,13 +64,17 @@ export function TaskDetailDialog({
     const [editingSubtaskTitle, setEditingSubtaskTitle] = useState('');
     const [editingSubtaskUrl, setEditingSubtaskUrl] = useState('');
 
-    // Get existing tags for autocomplete (excluding already added tags)
+    const [allExistingTags, setAllExistingTags] = useState<string[]>([]);
+
+    useEffect(() => {
+        getAllTags().then(tags => setAllExistingTags(tags));
+    }, []);
+
     const tagSuggestions = React.useMemo(() => {
-        const allExistingTags = getAllTags();
         return allExistingTags
             .filter(tag => !tags.includes(tag))
             .filter(tag => tag.toLowerCase().includes(tagInput.toLowerCase()));
-    }, [tags, tagInput]);
+    }, [tags, tagInput, allExistingTags]);
 
     useEffect(() => {
         if (task) {

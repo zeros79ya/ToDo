@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { Task, QuickLink, Note, Category } from '@/lib/types';
-import { getTasks, updateTask, getQuickLinks, updateQuickLink, getNotes, updateNote } from '@/lib/storage';
+import { useData } from '@/providers/data-provider';
 import { Star, Calendar, FileText, ExternalLink, Paperclip } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { format } from 'date-fns';
@@ -17,6 +17,7 @@ interface FavoritesViewProps {
 }
 
 export function FavoritesView({ categories, onTaskClick, onNoteClick, onScheduleClick, onDataChange }: FavoritesViewProps) {
+    const { tasks, quickLinks, notes, updateTask, updateQuickLink, updateNote } = useData();
     const [favoriteTasks, setFavoriteTasks] = useState<Task[]>([]);
     const [favoriteLinks, setFavoriteLinks] = useState<QuickLink[]>([]);
     const [favoriteNotes, setFavoriteNotes] = useState<Note[]>([]);
@@ -35,15 +36,11 @@ export function FavoritesView({ categories, onTaskClick, onNoteClick, onSchedule
     });
 
 
-    const loadFavorites = () => {
-        setFavoriteTasks(getTasks().filter(t => t.isFavorite));
-        setFavoriteLinks(getQuickLinks().filter(l => l.isFavorite));
-        setFavoriteNotes(getNotes().filter(n => n.isFavorite));
-    };
-
     useEffect(() => {
-        loadFavorites();
-    }, []);
+        setFavoriteTasks(tasks.filter(t => t.isFavorite));
+        setFavoriteLinks(quickLinks.filter(l => l.isFavorite));
+        setFavoriteNotes(notes.filter(n => n.isFavorite));
+    }, [tasks, quickLinks, notes]);
 
     const handleCopyUrl = (url: string) => {
         navigator.clipboard.writeText(url);
@@ -51,24 +48,14 @@ export function FavoritesView({ categories, onTaskClick, onNoteClick, onSchedule
         setTimeout(() => setShowCopyToast(false), 2000);
     };
 
-    const handleToggleFavorite = (type: 'task' | 'link' | 'note', id: string) => {
+    const handleToggleFavorite = async (type: 'task' | 'link' | 'note', id: string) => {
         if (type === 'task') {
-            const task = favoriteTasks.find(t => t.id === id);
-            if (task) {
-                updateTask(id, { isFavorite: false });
-            }
+            await updateTask(id, { isFavorite: false });
         } else if (type === 'link') {
-            const link = favoriteLinks.find(l => l.id === id);
-            if (link) {
-                updateQuickLink(id, { isFavorite: false });
-            }
+            await updateQuickLink(id, { isFavorite: false });
         } else if (type === 'note') {
-            const note = favoriteNotes.find(n => n.id === id);
-            if (note) {
-                updateNote(id, { isFavorite: false });
-            }
+            await updateNote(id, { isFavorite: false });
         }
-        loadFavorites();
         onDataChange?.();
     };
 

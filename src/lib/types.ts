@@ -108,8 +108,9 @@ export interface TeamMember {
     name: string;             // 이름
     employeeId: string;       // 사번
     department: string;       // 소속
-    process: string;          // 공정
+    group: string;            // 그룹 (CP, OLB, LASER, 라미1, 라미2)
     part: string;             // 파트
+    processType: string;      // 공정/설비
     position: string;         // 직급
     positionYear: number;     // 직급연차
     birthYear: number;        // 출생년도
@@ -120,6 +121,8 @@ export interface TeamMember {
     updatedAt: string;
 }
 
+export type TripCategory = 'trip' | 'vacation' | 'education' | 'others';
+
 export interface BusinessTrip {
     id: string; // unique id (uuid)
     knoxId?: string; // Link to TeamMember if matched
@@ -128,6 +131,7 @@ export interface BusinessTrip {
     endDate: string; // ISO Date YYYY-MM-DD
     location: string;
     purpose: string; // e.g. "해외출장(생산법인)"
+    category: TripCategory; // 출장/휴가/교육
     status: 'planned' | 'active' | 'completed';
     createdAt: string;
     updatedAt: string;
@@ -136,4 +140,20 @@ export interface BusinessTrip {
 export interface TripParseResult {
     trips: BusinessTrip[];
     unknownNames: string[]; // Names that couldn't be auto-matched to a single member
+}
+
+// 출장현황 DB (수동 입력 데이터)
+export interface TripRecord {
+    id: string;
+    knoxId?: string;       // Knox_ID (matched to TeamMember)
+    name: string;          // 이름
+    group: string;         // 그룹
+    part: string;          // 파트
+    destination: string;   // 출장지
+    startDate: string;     // 출발 YYYY-MM-DD
+    endDate: string;       // 도착 YYYY-MM-DD
+    purpose: string;       // 출장목적
+    rawData?: string[];    // 원본 데이터 배열 (Import 시 그대로 표시용)
+    createdAt: string;
+    updatedAt: string;
 }

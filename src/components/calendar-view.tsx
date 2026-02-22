@@ -23,14 +23,16 @@ import {
     isWithinInterval
 } from 'date-fns';
 import { ko } from 'date-fns/locale';
-import { Task, Category } from '@/lib/types';
-import { ChevronLeft, ChevronRight, GripVertical, Trash2, Paperclip, Plus, Search, Star } from 'lucide-react';
+import { Task, Category, BusinessTrip, TeamMember, TripRecord } from '@/lib/types';
+import { useData } from '@/providers/data-provider';
+import { ChevronLeft, ChevronRight, GripVertical, Trash2, Paperclip, Plus, Search, Star, Plane, Palmtree, GraduationCap, Clock, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { TeamScheduleAddModal } from './team-schedule-add-modal';
 import { TeamScheduleSearchModal } from './team-schedule-search-modal';
 import { CalendarSettingsModal, CalendarSettings, DEFAULT_SETTINGS } from './calendar-settings-modal';
 import { getHoliday } from '../lib/holidays';
 import { Settings } from 'lucide-react';
+import { TeamMemberStatusTable } from './team-member-status-table';
 
 interface CalendarViewProps {
     tasks: Task[];
@@ -77,6 +79,22 @@ export function CalendarView({
     const [showCopyToast, setShowCopyToast] = useState(false);
     const [isSearchModalOpen, setIsSearchModalOpen] = useState(false);
 
+    // Attendance badge state
+    const [members, setMembers] = useState<TeamMember[]>([]);
+    const [trips, setTrips] = useState<BusinessTrip[]>([]);
+    const [tripRecords, setTripRecords] = useState<TripRecord[]>([]);
+    const [attendanceModal, setAttendanceModal] = useState<'trip' | 'vacation' | 'education' | null>(null);
+    const [isTeamStatusModalOpen, setIsTeamStatusModalOpen] = useState(false);
+
+    const { teamMembers: contextMembers, businessTrips: contextTrips, tripRecords: contextTripRecords, updateTask, notes, deleteNote } = useData();
+
+    // Load attendance data
+    useEffect(() => {
+        setMembers(contextMembers.filter(m => m.status !== '퇴직'));
+        setTrips(contextTrips);
+        setTripRecords(contextTripRecords);
+    }, [contextMembers, contextTrips, contextTripRecords]);
+
     const handleCopyUrl = (url: string) => {
         navigator.clipboard.writeText(url);
         setShowCopyToast(true);
@@ -94,7 +112,7 @@ export function CalendarView({
                 return false; // Not a URL, proceed with normal click
             }
 
-            const { updateTask } = await import('@/lib/storage');
+            // (using updateTask from context)
 
             // Get existing URLs (support both legacy resourceUrl and resourceUrls array)
             const existingUrls = task.resourceUrls && task.resourceUrls.length > 0
@@ -376,9 +394,6 @@ export function CalendarView({
         const noteId = e.dataTransfer.getData('note-id');
         if (!noteId) return;
 
-        // Import storage dynamically
-        const { getNotes, updateTask, deleteNote } = await import('@/lib/storage');
-        const notes = getNotes();
         const note = notes.find(n => n.id === noteId);
 
         if (note) {
@@ -438,7 +453,7 @@ export function CalendarView({
                 }
 
                 // Update Task
-                const result = updateTask(targetTask.id, {
+                const result = await updateTask(targetTask.id, {
                     notes: newNotes,
                     resourceUrl: newUrl,
                     tags: newTags
@@ -497,33 +512,49 @@ export function CalendarView({
                     >
                         오늘
                     </button>
+                    {/* Attendance Badges */}
+                    {(() => {
+                        const today = new Date();
+                        const activeTrips = trips.filter(t => {
+                            const start = new Date(t.startDate);
+                            const end = new Date(t.endDate);
+                            start.setHours(0, 0, 0, 0);
+                            end.setHours(23, 59, 59, 999);
+                            return today >= start && today <= end;
+                        });
+                        const onTrip = activeTrips.filter(t => t.category === 'trip');
+                        const onVacation = activeTrips.filter(t => t.category === 'vacation');
+                        const onEducation = activeTrips.filter(t => t.category === 'education');
+                        const tripNames = new Set(onTrip.map(t => t.knoxId || t.name));
+                        const vacNames = new Set(onVacation.map(t => t.knoxId || t.name));
+                        const eduNames = new Set(onEducation.map(t => t.knoxId || t.name));
+
+                        const badges: { cat: 'trip' | 'vacation' | 'education'; label: string; count: number; icon: React.ReactNode; color: string; bgColor: string; borderColor: string }[] = [
+                            { cat: 'trip', label: '출장', count: tripNames.size, icon: <Plane className="w-3.5 h-3.5" />, color: 'text-blue-600', bgColor: 'bg-blue-50 dark:bg-blue-900/30', borderColor: 'border-blue-200 dark:border-blue-800' },
+                            { cat: 'vacation', label: '휴가', count: vacNames.size, icon: <Palmtree className="w-3.5 h-3.5" />, color: 'text-emerald-600', bgColor: 'bg-emerald-50 dark:bg-emerald-900/30', borderColor: 'border-emerald-200 dark:border-emerald-800' },
+                            { cat: 'education', label: '교육', count: eduNames.size, icon: <GraduationCap className="w-3.5 h-3.5" />, color: 'text-purple-600', bgColor: 'bg-purple-50 dark:bg-purple-900/30', borderColor: 'border-purple-200 dark:border-purple-800' },
+                        ];
+
+                        return badges.map(b => (
+                            <button
+                                key={b.cat}
+                                onClick={() => b.count > 0 ? setAttendanceModal(b.cat) : undefined}
+                                className={`flex items-center gap-1.5 px-2.5 py-1 text-sm font-medium rounded-lg border transition-all ${b.count > 0
+                                    ? `${b.bgColor} ${b.borderColor} ${b.color} hover:shadow-sm hover:scale-[1.03] cursor-pointer`
+                                    : 'bg-gray-50 dark:bg-gray-800 border-gray-200 dark:border-gray-700 text-gray-400 cursor-default'
+                                    }`}
+                            >
+                                {b.icon}
+                                <span>{b.label}</span>
+                                <span className="font-bold">{b.count}</span>
+                            </button>
+                        ));
+                    })()}
                     <button
-                        onClick={() => onShowWeekendsChange(!showWeekends)}
-                        className={`px-3 py-1 text-sm font-medium rounded transition-colors ${showWeekends
-                            ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300'
-                            : 'bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400'
-                            }`}
+                        onClick={() => setIsTeamStatusModalOpen(true)}
+                        className="flex items-center gap-1.5 px-2.5 py-1 text-sm font-medium rounded-lg border border-indigo-200 dark:border-indigo-800 text-indigo-700 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-900/30 hover:shadow-sm hover:scale-[1.03] transition-all"
                     >
-                        {showWeekends ? '일요일 숨기기' : '일요일 보기'}
-                    </button>
-                    <button
-                        onClick={() => setShowOnlyTeamSchedule(!showOnlyTeamSchedule)}
-                        className={`px-3 py-1 text-sm font-medium rounded transition-colors ${showOnlyTeamSchedule
-                            ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300 ring-2 ring-purple-500 ring-opacity-50'
-                            : 'bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400'
-                            }`}
-                    >
-                        {showOnlyTeamSchedule ? '이전 보기' : '팀 일정'}
-                    </button>
-                    <button
-                        onClick={() => setShowOnlyExecutive(!showOnlyExecutive)}
-                        className={`px-3 py-1 text-sm font-medium rounded transition-colors ${showOnlyExecutive
-                            ? 'bg-orange-100 text-orange-700 dark:bg-orange-900/40 dark:text-orange-300 ring-2 ring-orange-500 ring-opacity-50'
-                            : 'bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400'
-                            }`}
-                        title="대표/사업부/센터 일정만 표시"
-                    >
-                        {showOnlyExecutive ? '전체 보기' : '임원 일정'}
+                        팀원 현황
                     </button>
                 </div>
 
@@ -1286,6 +1317,403 @@ export function CalendarView({
                 onSettingsChange={setSettings}
                 onReset={() => setSettings(DEFAULT_SETTINGS)}
             />
+
+            {/* Team Member Status Modal */}
+            <AnimatePresence>
+                {isTeamStatusModalOpen && (
+                    <motion.div
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4"
+                        onClick={() => setIsTeamStatusModalOpen(false)}
+                    >
+                        <motion.div
+                            initial={{ scale: 0.98, opacity: 0 }}
+                            animate={{ scale: 1, opacity: 1 }}
+                            exit={{ scale: 0.98, opacity: 0 }}
+                            transition={{ duration: 0.15 }}
+                            className="w-full max-w-7xl max-h-[90vh] bg-white dark:bg-gray-900 rounded-2xl shadow-2xl border border-gray-200 dark:border-gray-700 overflow-hidden"
+                            onClick={(e) => e.stopPropagation()}
+                        >
+                            <div className="px-5 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
+                                <h3 className="text-lg font-bold text-gray-800 dark:text-gray-100">팀원 현황</h3>
+                                <button
+                                    onClick={() => setIsTeamStatusModalOpen(false)}
+                                    className="p-1.5 rounded-md hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-500"
+                                >
+                                    <X className="w-5 h-5" />
+                                </button>
+                            </div>
+                            <div className="p-4">
+                                <TeamMemberStatusTable members={members} heightClassName="h-[72vh]" />
+                            </div>
+                        </motion.div>
+                    </motion.div>
+                )}
+            </AnimatePresence>
+
+            {/* Attendance Detail Modal */}
+            <AnimatePresence>
+                {attendanceModal && (() => {
+                    const categoryMeta: Record<string, { label: string; icon: React.ReactNode; color: string; bgColor: string; borderColor: string }> = {
+                        trip: { label: '출장', icon: <Plane className="w-5 h-5" />, color: 'text-blue-600', bgColor: 'bg-blue-50 dark:bg-blue-900/30', borderColor: 'border-blue-200 dark:border-blue-800' },
+                        vacation: { label: '휴가', icon: <Palmtree className="w-5 h-5" />, color: 'text-emerald-600', bgColor: 'bg-emerald-50 dark:bg-emerald-900/30', borderColor: 'border-emerald-200 dark:border-emerald-800' },
+                        education: { label: '교육', icon: <GraduationCap className="w-5 h-5" />, color: 'text-purple-600', bgColor: 'bg-purple-50 dark:bg-purple-900/30', borderColor: 'border-purple-200 dark:border-purple-800' },
+                    };
+                    const meta = categoryMeta[attendanceModal];
+                    const today = new Date();
+                    const activeTrips = trips.filter(t => {
+                        const start = new Date(t.startDate);
+                        const end = new Date(t.endDate);
+                        start.setHours(0, 0, 0, 0);
+                        end.setHours(23, 59, 59, 999);
+                        return today >= start && today <= end && t.category === attendanceModal;
+                    });
+
+                    const formatDateRange = (s: string, e: string) => {
+                        const sd = new Date(s); const ed = new Date(e);
+                        return `${sd.getMonth() + 1}/${sd.getDate()} ~ ${ed.getMonth() + 1}/${ed.getDate()}`;
+                    };
+
+                    // === Trip-specific enhanced view ===
+                    const isTripModal = attendanceModal === 'trip';
+
+                    // Resolve destination for each active trip using TripRecord
+                    const resolveDestForTrip = (bt: BusinessTrip): string => {
+                        // Find matching TripRecord by knoxId + date overlap
+                        const match = tripRecords.find(r => {
+                            if (!r.destination) return false;
+                            const nameMatch = (r.knoxId && bt.knoxId && r.knoxId === bt.knoxId) ||
+                                (r.name === bt.name);
+                            if (!nameMatch) return false;
+                            // Date overlap check
+                            return r.startDate <= bt.endDate && r.endDate >= bt.startDate;
+                        });
+                        return match?.destination || bt.location || '미지정';
+                    };
+
+                    const ALLOWED_DEPTS = ['실장기술', '라미기술'];
+
+                    // Build enriched trip data with destination AND filter by department if trip modal
+                    type EnrichedTrip = BusinessTrip & { destination: string; member?: TeamMember };
+                    const enrichedTrips: EnrichedTrip[] = activeTrips.map(t => ({
+                        ...t,
+                        destination: isTripModal ? resolveDestForTrip(t) : '',
+                        member: members.find(m => m.knoxId === t.knoxId || m.name === t.name),
+                    })).filter(t => {
+                        if (!isTripModal) return true;
+                        const dept = t.member?.department || '미지정';
+                        return ALLOWED_DEPTS.includes(dept);
+                    });
+
+                    // Collect unique destinations in fixed order
+                    const DEST_ORDER = ['SDV', 'SDD', 'SDT', 'SDN'];
+                    const destinations = isTripModal
+                        ? DEST_ORDER.filter(d => enrichedTrips.some(t => t.destination === d))
+                            .concat(Array.from(new Set(enrichedTrips.map(t => t.destination))).filter(d => !DEST_ORDER.includes(d)).sort())
+                        : [];
+
+                    // === Build matrix: department > group > part × destination ===
+                    type RowKey = { department: string; group: string; part: string };
+                    const matrixRows: { key: RowKey; counts: Record<string, number>; total: number }[] = [];
+                    const departmentOrder = ['실장기술', '라미기술'];
+
+                    if (isTripModal) {
+                        // Group enriched trips by unique (dept, group, part) — only allowed departments
+                        const rowMap = new Map<string, { key: RowKey; counts: Record<string, number>; total: number }>();
+
+                        enrichedTrips.forEach(t => {
+                            const dept = t.member?.department || '미지정';
+                            const grp = t.member?.group || '미지정';
+                            const prt = t.member?.part || '미지정';
+                            const mapKey = `${dept}|${grp}|${prt}`;
+
+                            if (!rowMap.has(mapKey)) {
+                                rowMap.set(mapKey, { key: { department: dept, group: grp, part: prt }, counts: {}, total: 0 });
+                            }
+                            const row = rowMap.get(mapKey)!;
+                            // Deduplicate by person name per destination
+                            const personKey = t.knoxId || t.name;
+                            const destCountKey = `${t.destination}|${personKey}`;
+                            if (!(row as any).__seen) (row as any).__seen = new Set();
+                            if (!(row as any).__seen.has(destCountKey)) {
+                                (row as any).__seen.add(destCountKey);
+                                row.counts[t.destination] = (row.counts[t.destination] || 0) + 1;
+                                row.total++;
+                            }
+                        });
+
+                        // Sort rows by department order, then group, then part
+                        const sorted = Array.from(rowMap.values()).sort((a, b) => {
+                            const deptCmp = departmentOrder.indexOf(a.key.department) - departmentOrder.indexOf(b.key.department);
+                            if (deptCmp !== 0) return deptCmp;
+                            if (a.key.group !== b.key.group) return a.key.group.localeCompare(b.key.group);
+                            return a.key.part.localeCompare(b.key.part);
+                        });
+                        matrixRows.push(...sorted);
+                    }
+
+                    // Subtotals by department
+                    const deptSubtotals: Record<string, Record<string, number>> = {};
+                    const grandTotal: Record<string, number> = {};
+                    let grandTotalAll = 0;
+
+                    matrixRows.forEach(row => {
+                        const dept = row.key.department;
+                        if (!deptSubtotals[dept]) deptSubtotals[dept] = {};
+                        destinations.forEach(d => {
+                            const c = row.counts[d] || 0;
+                            deptSubtotals[dept][d] = (deptSubtotals[dept][d] || 0) + c;
+                            grandTotal[d] = (grandTotal[d] || 0) + c;
+                        });
+                        grandTotalAll += row.total;
+                    });
+
+                    // Group by destination for detail section
+                    const tripsByDest = new Map<string, EnrichedTrip[]>();
+                    if (isTripModal) {
+                        enrichedTrips.forEach(t => {
+                            if (!tripsByDest.has(t.destination)) tripsByDest.set(t.destination, []);
+                            tripsByDest.get(t.destination)!.push(t);
+                        });
+                    }
+
+                    // Non-trip modal: simple person grouping (vacation/education)
+                    const grouped = new Map<string, BusinessTrip[]>();
+                    if (!isTripModal) {
+                        activeTrips.forEach(t => {
+                            const key = t.knoxId || t.name;
+                            if (!grouped.has(key)) grouped.set(key, []);
+                            grouped.get(key)!.push(t);
+                        });
+                    }
+
+                    return (
+                        <motion.div
+                            initial={{ opacity: 0 }}
+                            animate={{ opacity: 1 }}
+                            exit={{ opacity: 0 }}
+                            className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4"
+                            onClick={() => setAttendanceModal(null)}
+                        >
+                            <motion.div
+                                initial={{ opacity: 0, scale: 0.95, y: 10 }}
+                                animate={{ opacity: 1, scale: 1, y: 0 }}
+                                exit={{ opacity: 0, scale: 0.95, y: 10 }}
+                                className={`bg-white dark:bg-gray-900 rounded-xl shadow-2xl border border-gray-200 dark:border-gray-700 w-full ${isTripModal ? 'max-w-4xl max-h-[85vh]' : 'max-w-lg max-h-[70vh]'} flex flex-col`}
+                                onClick={e => e.stopPropagation()}
+                            >
+                                {/* Header */}
+                                <div className={`flex items-center justify-between px-5 py-4 border-b ${meta.borderColor} ${meta.bgColor} rounded-t-xl flex-shrink-0`}>
+                                    <div className="flex items-center gap-3">
+                                        <div className={meta.color}>{meta.icon}</div>
+                                        <div>
+                                            <h2 className="text-base font-bold text-gray-900 dark:text-white">
+                                                {meta.label}중 현황
+                                            </h2>
+                                            <p className="text-xs text-gray-500 dark:text-gray-400">
+                                                {today.getFullYear()}년 {today.getMonth() + 1}월 {today.getDate()}일 기준
+                                            </p>
+                                        </div>
+                                    </div>
+                                    <button
+                                        onClick={() => setAttendanceModal(null)}
+                                        className="p-1.5 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
+                                    >
+                                        <X className="w-5 h-5 text-gray-500" />
+                                    </button>
+                                </div>
+
+                                {/* Body */}
+                                <div className="flex-1 overflow-auto p-4 space-y-6">
+                                    {activeTrips.length === 0 ? (
+                                        <div className="text-center text-gray-400 py-10">해당하는 인원이 없습니다</div>
+                                    ) : isTripModal ? (
+                                        <>
+                                            {/* ━━━ Section 1: Matrix Summary Table ━━━ */}
+                                            <div>
+                                                <h3 className="text-sm font-bold text-gray-800 dark:text-gray-200 mb-2">□ 출장 전체 현황</h3>
+                                                <div className="overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-700">
+                                                    <table className="w-full text-xs">
+                                                        <thead>
+                                                            <tr className="bg-gray-50 dark:bg-gray-800">
+                                                                <th className="px-2 py-2 text-left font-semibold text-gray-600 dark:text-gray-300 border-b border-r border-gray-200 dark:border-gray-700 min-w-[70px]">소속</th>
+                                                                <th className="px-2 py-2 text-left font-semibold text-gray-600 dark:text-gray-300 border-b border-r border-gray-200 dark:border-gray-700 min-w-[60px]">그룹</th>
+                                                                <th className="px-2 py-2 text-left font-semibold text-gray-600 dark:text-gray-300 border-b border-r border-gray-200 dark:border-gray-700 min-w-[60px]">파트</th>
+                                                                {destinations.map(d => (
+                                                                    <th key={d} className="px-2 py-2 text-center font-semibold text-blue-600 dark:text-blue-400 border-b border-r border-gray-200 dark:border-gray-700 min-w-[45px]">{d}</th>
+                                                                ))}
+                                                                <th className="px-2 py-2 text-center font-bold text-gray-700 dark:text-gray-200 border-b border-gray-200 dark:border-gray-700 min-w-[35px]">계</th>
+                                                            </tr>
+                                                        </thead>
+                                                        <tbody>
+                                                            {(() => {
+                                                                const rows: React.ReactNode[] = [];
+                                                                let prevDept = '';
+                                                                let prevGroup = '';
+
+                                                                matrixRows.forEach((row, idx) => {
+                                                                    const showDept = row.key.department !== prevDept;
+                                                                    const showGroup = row.key.group !== prevGroup || showDept;
+
+                                                                    // Insert department subtotal before new department
+                                                                    if (showDept && prevDept && deptSubtotals[prevDept]) {
+                                                                        const sub = deptSubtotals[prevDept];
+                                                                        const subTotal = Object.values(sub).reduce((a, b) => a + b, 0);
+                                                                        rows.push(
+                                                                            <tr key={`sub-${prevDept}`} className="bg-gray-100 dark:bg-gray-800/60 font-semibold">
+                                                                                <td colSpan={3} className="px-2 py-1.5 text-right text-gray-600 dark:text-gray-300 border-b border-r border-gray-200 dark:border-gray-700">소계</td>
+                                                                                {destinations.map(d => (
+                                                                                    <td key={d} className="px-2 py-1.5 text-center text-gray-700 dark:text-gray-300 border-b border-r border-gray-200 dark:border-gray-700">{sub[d] || ''}</td>
+                                                                                ))}
+                                                                                <td className="px-2 py-1.5 text-center text-gray-800 dark:text-gray-200 border-b border-gray-200 dark:border-gray-700">{subTotal}</td>
+                                                                            </tr>
+                                                                        );
+                                                                    }
+
+                                                                    rows.push(
+                                                                        <tr key={idx} className="hover:bg-gray-50 dark:hover:bg-gray-800/30">
+                                                                            <td className={`px-2 py-1.5 text-gray-700 dark:text-gray-300 border-b border-r border-gray-200 dark:border-gray-700 ${showDept ? 'font-medium' : ''}`}>
+                                                                                {showDept ? row.key.department : ''}
+                                                                            </td>
+                                                                            <td className={`px-2 py-1.5 text-gray-600 dark:text-gray-400 border-b border-r border-gray-200 dark:border-gray-700 ${showGroup ? '' : ''}`}>
+                                                                                {showGroup ? row.key.group : ''}
+                                                                            </td>
+                                                                            <td className="px-2 py-1.5 text-gray-600 dark:text-gray-400 border-b border-r border-gray-200 dark:border-gray-700">
+                                                                                {row.key.part}
+                                                                            </td>
+                                                                            {destinations.map(d => (
+                                                                                <td key={d} className="px-2 py-1.5 text-center border-b border-r border-gray-200 dark:border-gray-700">
+                                                                                    {row.counts[d] ? (
+                                                                                        <span className="text-blue-600 dark:text-blue-400 font-medium">{row.counts[d]}</span>
+                                                                                    ) : ''}
+                                                                                </td>
+                                                                            ))}
+                                                                            <td className="px-2 py-1.5 text-center font-medium text-gray-700 dark:text-gray-300 border-b border-gray-200 dark:border-gray-700">{row.total}</td>
+                                                                        </tr>
+                                                                    );
+
+                                                                    prevDept = row.key.department;
+                                                                    prevGroup = row.key.group;
+                                                                });
+
+                                                                // Last department subtotal
+                                                                if (prevDept && deptSubtotals[prevDept]) {
+                                                                    const sub = deptSubtotals[prevDept];
+                                                                    const subTotal = Object.values(sub).reduce((a, b) => a + b, 0);
+                                                                    rows.push(
+                                                                        <tr key={`sub-${prevDept}`} className="bg-gray-100 dark:bg-gray-800/60 font-semibold">
+                                                                            <td colSpan={3} className="px-2 py-1.5 text-right text-gray-600 dark:text-gray-300 border-b border-r border-gray-200 dark:border-gray-700">소계</td>
+                                                                            {destinations.map(d => (
+                                                                                <td key={d} className="px-2 py-1.5 text-center text-gray-700 dark:text-gray-300 border-b border-r border-gray-200 dark:border-gray-700">{sub[d] || ''}</td>
+                                                                            ))}
+                                                                            <td className="px-2 py-1.5 text-center text-gray-800 dark:text-gray-200 border-b border-gray-200 dark:border-gray-700">{subTotal}</td>
+                                                                        </tr>
+                                                                    );
+                                                                }
+
+                                                                // Grand total
+                                                                rows.push(
+                                                                    <tr key="grand-total" className="bg-blue-50 dark:bg-blue-900/20 font-bold">
+                                                                        <td colSpan={3} className="px-2 py-2 text-right text-gray-800 dark:text-gray-200 border-r border-gray-200 dark:border-gray-700">계</td>
+                                                                        {destinations.map(d => (
+                                                                            <td key={d} className="px-2 py-2 text-center text-blue-700 dark:text-blue-300 border-r border-gray-200 dark:border-gray-700">{grandTotal[d] || ''}</td>
+                                                                        ))}
+                                                                        <td className="px-2 py-2 text-center text-blue-800 dark:text-blue-200">{grandTotalAll}</td>
+                                                                    </tr>
+                                                                );
+
+                                                                return rows;
+                                                            })()}
+                                                        </tbody>
+                                                    </table>
+                                                </div>
+                                            </div>
+
+                                            {/* ━━━ Section 2: Per-Destination Detail ━━━ */}
+                                            <div>
+                                                <h3 className="text-sm font-bold text-gray-800 dark:text-gray-200 mb-3">□ 출장지별 현황</h3>
+                                                <div className="space-y-4">
+                                                    {destinations.map((dest, di) => {
+                                                        const destTrips = tripsByDest.get(dest) || [];
+                                                        // Dedupe by person
+                                                        const personMap = new Map<string, EnrichedTrip[]>();
+                                                        destTrips.forEach(t => {
+                                                            const pk = t.knoxId || t.name;
+                                                            if (!personMap.has(pk)) personMap.set(pk, []);
+                                                            personMap.get(pk)!.push(t);
+                                                        });
+
+                                                        return (
+                                                            <div key={dest}>
+                                                                <div className="flex items-center gap-2 mb-1.5">
+                                                                    <span className="text-sm font-bold text-blue-600 dark:text-blue-400">{di + 1}. {dest}</span>
+                                                                    <span className="text-xs text-gray-400">({personMap.size}명)</span>
+                                                                </div>
+                                                                <div className="grid grid-cols-2 gap-2 ml-2">
+                                                                    {Array.from(personMap.entries()).map(([pk, pTrips]) => {
+                                                                        const p = pTrips[0];
+                                                                        return (
+                                                                            <div key={pk} className="rounded-lg border border-gray-100 dark:border-gray-800 p-2.5 hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors">
+                                                                                <div className="flex items-center gap-2 mb-1">
+                                                                                    <span className="font-semibold text-sm text-gray-800 dark:text-gray-200">{p.name}</span>
+                                                                                    {p.member && (
+                                                                                        <span className="text-[10px] text-gray-400">{p.member.group} · {p.member.part}</span>
+                                                                                    )}
+                                                                                </div>
+                                                                                {pTrips.map(t => (
+                                                                                    <div key={t.id} className="flex items-center gap-1.5 text-[11px] text-gray-500 dark:text-gray-400 mt-0.5">
+                                                                                        <Clock className="w-3 h-3 flex-shrink-0" />
+                                                                                        <span>{formatDateRange(t.startDate, t.endDate)}</span>
+                                                                                        {t.purpose && <><span className="text-gray-300">·</span><span className="truncate">{t.purpose}</span></>}
+                                                                                    </div>
+                                                                                ))}
+                                                                            </div>
+                                                                        );
+                                                                    })}
+                                                                </div>
+                                                            </div>
+                                                        );
+                                                    })}
+                                                </div>
+                                            </div>
+                                        </>
+                                    ) : (
+                                        /* Vacation / Education: simple person list */
+                                        <div className="space-y-2">
+                                            {Array.from(grouped.entries()).map(([key, personTrips]) => {
+                                                const person = personTrips[0];
+                                                const member = members.find(m => m.knoxId === person.knoxId);
+                                                return (
+                                                    <div key={key} className="rounded-lg border border-gray-100 dark:border-gray-800 p-3 hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors">
+                                                        <div className="flex items-center justify-between mb-1">
+                                                            <div className="flex items-center gap-2">
+                                                                <span className="font-semibold text-sm text-gray-800 dark:text-gray-200">{person.name}</span>
+                                                                {member && (
+                                                                    <span className="text-xs text-gray-400">{member.group} · {member.part}</span>
+                                                                )}
+                                                            </div>
+                                                        </div>
+                                                        {personTrips.map(t => (
+                                                            <div key={t.id} className="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-400 ml-1 mt-1">
+                                                                <Clock className="w-3 h-3 flex-shrink-0" />
+                                                                <span>{formatDateRange(t.startDate, t.endDate)}</span>
+                                                                <span className="text-gray-400">·</span>
+                                                                <span className="truncate">{t.purpose || t.location || '-'}</span>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                );
+                                            })}
+                                        </div>
+                                    )}
+                                </div>
+                            </motion.div>
+                        </motion.div>
+                    );
+                })()}
+            </AnimatePresence>
         </div>
     );
 }

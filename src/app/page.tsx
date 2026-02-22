@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Category, Task } from '@/lib/types';
 import { format } from 'date-fns';
-import { getCategories, getTasks, addTask, getTheme, setTheme, Theme, getLayoutState, saveLayoutState, getLayoutPreset, saveLayoutPreset, Layout, LayoutState, generateId, addCategory, deleteTask, updateTask, addNote, updateNote } from '@/lib/storage';
+import { getTheme, setTheme, Theme, getLayoutState, saveLayoutState, getLayoutPreset, saveLayoutPreset, Layout, LayoutState, generateId } from '@/lib/storage';
 import { Sidebar } from '@/components/sidebar';
 import { TaskList } from '@/components/task-list';
 import { CalendarView } from '@/components/calendar-view';
@@ -21,14 +21,26 @@ import { ParsedSchedule, parseScheduleText } from '@/lib/schedule-parser';
 import { Button } from '@/components/ui/button';
 import { PanelLeftClose, PanelLeft, Sun, Moon } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { DataProvider, useData } from '@/providers/data-provider';
 
-export default function Home() {
-  const [categories, setCategories] = useState<Category[]>([]);
+function HomeContent() {
+  const {
+    isDBLoading,
+    categories,
+    tasks,
+    addCategory,
+    updateCategory,
+    addTask,
+    deleteTask,
+    updateTask,
+    addNote,
+    updateNote,
+    refreshData
+  } = useData();
+
   const [selectedCategoryIds, setSelectedCategoryIds] = useState<string[]>([]);
-  const [tasks, setTasks] = useState<Task[]>([]);
   const [dialogType, setDialogType] = useState<'export' | 'import' | null>(null);
   const [isScheduleImportOpen, setIsScheduleImportOpen] = useState(false);
-  const [isLoading, setIsLoading] = useState(true);
   const [isSidebarVisible, setIsSidebarVisible] = useState(true);
   const [detailTask, setDetailTask] = useState<Task | null>(null);
   const [taskListWidth, setTaskListWidth] = useState(400);
@@ -48,56 +60,17 @@ export default function Home() {
   const containerRef = useRef<HTMLDivElement>(null);
   const viewModeRef = useRef(viewMode);
 
-  // Load categories from LocalStorage
-  const loadCategories = useCallback(() => {
-    const cats = getCategories();
-    setCategories(cats);
-    return cats;
-  }, []);
-
-  // Load tasks for selected categories (multiple)
-  const loadTasks = useCallback(() => {
-    const teamScheduleCat = categories.find(c => c.name === '팀 일정');
-    let targetIds = [...selectedCategoryIds];
-
-    // Always include 'Team Schedule' for Calendar view visibility
-    if (teamScheduleCat && !targetIds.includes(teamScheduleCat.id)) {
-      targetIds.push(teamScheduleCat.id);
-    }
-
-    if (targetIds.length > 0) {
-      const allTasks = targetIds.flatMap(id => getTasks(id));
-      setTasks(allTasks);
-    } else {
-      setTasks([]);
-    }
-  }, [selectedCategoryIds, categories]);
-
-  // Initial load
+  // Ensure default categories are selected once loaded
   useEffect(() => {
-    let cats = loadCategories();
-
-    // Ensure 'Team Schedule' category exists
-    if (!cats.find(c => c.name === '팀 일정')) {
-      addCategory('팀 일정');
-      cats = loadCategories();
-    }
-
-    if (cats.length > 0 && selectedCategoryIds.length === 0) {
-      const defaultIds = [cats[0].id];
-      const teamSchedule = cats.find(c => c.name === '팀 일정');
-      if (teamSchedule && teamSchedule.id !== cats[0].id) {
+    if (!isDBLoading && categories.length > 0 && selectedCategoryIds.length === 0) {
+      const defaultIds = [categories[0].id];
+      const teamSchedule = categories.find(c => c.name === '팀 일정');
+      if (teamSchedule && teamSchedule.id !== categories[0].id) {
         defaultIds.push(teamSchedule.id);
       }
       setSelectedCategoryIds(defaultIds);
     }
-    setIsLoading(false);
-  }, [loadCategories, selectedCategoryIds.length]);
-
-  // Load tasks when category changes
-  useEffect(() => {
-    loadTasks();
-  }, [loadTasks]);
+  }, [isDBLoading, categories, selectedCategoryIds.length]);
 
   // Load collectionGroups from calendar settings in localStorage
   useEffect(() => {
@@ -292,24 +265,16 @@ export default function Home() {
   }, [isResizing, isSidebarVisible, layout, taskListWidth]);
 
   const handleCategoriesChange = () => {
-    const cats = loadCategories();
-    // Keep only valid category IDs
-    setSelectedCategoryIds(prev => {
-      const validIds = prev.filter(id => cats.some(c => c.id === id));
-      return validIds.length > 0 ? validIds : (cats.length > 0 ? [cats[0].id] : []);
-    });
+    refreshData();
   };
 
   const handleTasksChange = () => {
-    loadTasks();
+    refreshData();
     setNotesVersion(prev => prev + 1);
   };
 
-  const handleTaskUpdate = (taskId: string, updates: Partial<Task>) => {
-    import('@/lib/storage').then(({ updateTask }) => {
-      updateTask(taskId, updates);
-      handleTasksChange();
-    });
+  const handleTaskUpdate = async (taskId: string, updates: Partial<Task>) => {
+    await updateTask(taskId, updates);
   };
 
   const handleDataChange = () => {
@@ -366,41 +331,37 @@ export default function Home() {
     }
   };
 
-  const handleTaskDrop = (taskId: string, newDate: Date) => {
+  const handleTaskDrop = async (taskId: string, newDate: Date) => {
     // Find the task to get its categoryId
     const task = tasks.find(t => t.id === taskId);
     if (!task) return;
 
-    import('@/lib/storage').then(({ updateTask, sortTasksByDate }) => {
-      updateTask(taskId, { dueDate: newDate.toISOString() });
-      // Sort tasks by date after updating
-      sortTasksByDate(task.categoryId);
-      loadTasks();
-    });
+    await updateTask(taskId, { dueDate: newDate.toISOString() });
+
+    // Refresh to re-sort visually if needed
+    refreshData();
   };
 
-  const handleTaskCopy = (taskId: string, newDate: Date) => {
+  const handleTaskCopy = async (taskId: string, newDate: Date) => {
     const task = tasks.find(t => t.id === taskId);
     if (!task) return;
 
-    import('@/lib/storage').then(({ addTask, updateTask, sortTasksByDate }) => {
-      // Create a new task via addTask to handle ID generation and defaults
-      const newTask = addTask(task.categoryId, task.title, newDate.toISOString());
+    // Create a new task via useData
+    const newTask = await addTask(task.categoryId, task.title, newDate.toISOString());
 
-      // Update other properties to match the original task
-      updateTask(newTask.id, {
-        assignee: task.assignee,
-        resourceUrl: task.resourceUrl,
-        notes: task.notes,
-        dueTime: task.dueTime,
-        tags: task.tags,
-        // We explicitly default to not completed for a new copy
-        completed: false,
-        completedAt: null
-      });
-
-      loadTasks();
+    // Update other properties to match the original task
+    await updateTask(newTask.id, {
+      assignee: task.assignee,
+      resourceUrl: task.resourceUrl,
+      notes: task.notes,
+      dueTime: task.dueTime,
+      tags: task.tags,
+      // We explicitly default to not completed for a new copy
+      completed: false,
+      completedAt: null
     });
+
+    refreshData();
   };
 
   // Handle category selection with Ctrl support
@@ -418,45 +379,32 @@ export default function Home() {
     }
   };
 
-  const handleScheduleImport = useCallback((schedules: ParsedSchedule[]) => {
+  const handleScheduleImport = useCallback(async (schedules: ParsedSchedule[]) => {
     // 1. Find or create "Team Schedule" category
     let scheduleCategory = categories.find(c => c.name === '팀 일정');
     if (!scheduleCategory) {
-      scheduleCategory = addCategory('팀 일정');
+      scheduleCategory = await addCategory('팀 일정');
     }
 
     // 2. Clear existing tasks in the Team Schedule category (Smart Overwrite Strategy)
-    // Identify which months are included in the new schedules
     const targetMonths = new Set<string>();
     schedules.forEach(s => {
-      // Format: "YYYY-MM"
       const yearMonth = `${s.date.getFullYear()}-${s.date.getMonth()}`;
       targetMonths.add(yearMonth);
     });
 
-    // Backup map to preserve user data: Key = "YYYY-MM-DD|Title"
-    // We strive to keep: resourceUrl, notes, tags, isPinned
     const backupMap = new Map<string, Partial<Task>>();
 
-    const existingTasks = getTasks(scheduleCategory.id);
-    existingTasks.forEach(t => {
-      // Only protect tasks explicitly marked as 'manual'
-      // Tasks with source: 'team' or undefined (legacy) will be deleted and re-created
-      if (t.source === 'manual') {
-        return; // Preserve only explicitly manual tasks
-      }
+    const existingTasks = tasks.filter(t => t.categoryId === scheduleCategory!.id);
+    for (const t of existingTasks) {
+      if (t.source === 'manual') continue;
 
       if (t.dueDate) {
         const taskDate = new Date(t.dueDate);
         const taskYearMonth = `${taskDate.getFullYear()}-${taskDate.getMonth()}`;
 
-        // Only delete tasks that belong to the months we are about to update
         if (targetMonths.has(taskYearMonth)) {
-          // Create backup key
           const dateStr = format(taskDate, 'yyyy-MM-dd');
-          // We use Title matching. Note: Schedule parser trims titles.
-          // Ideally we match by Title + Date. Time might change slightly or formatting differences.
-          // But strict matching (Date + Title) is a good baseline.
           const key = `${dateStr}|${t.title.trim()}`;
 
           backupMap.set(key, {
@@ -464,25 +412,23 @@ export default function Home() {
             notes: t.notes,
             tags: t.tags,
             isPinned: t.isPinned,
-            completed: t.completed // Keep completion status too if desired? User didn't ask but good to have.
+            completed: t.completed
           });
 
-          deleteTask(t.id);
+          await deleteTask(t.id);
         }
       }
-    });
+    }
 
     // 3. Add new tasks
-    schedules.forEach(schedule => {
-      if (!scheduleCategory) return;
+    for (const schedule of schedules) {
+      if (!scheduleCategory) continue;
 
-      // Check if we have backup data for this item
       const dateStr = format(schedule.date, 'yyyy-MM-dd');
       const key = `${dateStr}|${schedule.title.trim()}`;
       const backup = backupMap.get(key);
 
-      // Use addTask helper which handles ID generation
-      const newTask = addTask(
+      const newTask = await addTask(
         scheduleCategory.id,
         schedule.title,
         schedule.date.toISOString(),
@@ -490,73 +436,60 @@ export default function Home() {
           dueTime: schedule.time,
           highlightLevel: schedule.highlightLevel,
           organizer: schedule.organizer,
-          source: 'team' // Mark as team schedule import
+          source: 'team'
         }
       );
 
-      // Restore user data if backup exists
       if (backup) {
-        updateTask(newTask.id, {
+        await updateTask(newTask.id, {
           resourceUrl: backup.resourceUrl,
           notes: backup.notes,
           tags: backup.tags,
           isPinned: backup.isPinned,
           completed: backup.completed
         });
-        // Remove from backup map to mark as handled
         backupMap.delete(key);
       }
-    });
+    }
 
-    // 4. Handle Orphaned Data (Save to Keep)
-    // Any items remaining in backupMap were deleted but not matched to a new schedule.
-    // Save their valuable data (notes, URL) to Keep.
+    // 4. Handle Orphaned Data
     let orphanedCount = 0;
     if (backupMap.size > 0) {
-      backupMap.forEach((data, key) => {
-        // Only save if there is actually data to preserve (URL, Notes, or Tags)
+      for (const [key, data] of backupMap.entries()) {
         if (data.resourceUrl || data.notes || (data.tags && data.tags.length > 0)) {
           const [dateStr, title] = key.split('|');
-          // Build content (without title - title goes to note.title)
           let noteContent = '';
           if (data.resourceUrl) noteContent += `🔗 자료: ${data.resourceUrl}\n`;
           if (data.tags && data.tags.length > 0) noteContent += `🏷️ 태그: ${data.tags.join(', ')}\n`;
           if (data.notes) noteContent += `📝 메모:\n${data.notes}`;
 
-          // Save to Keep and Pin it for easy access (Sidebar)
-          // addNote(title, content, color) - use proper parameter order
           const noteTitle = `[자동백업] ${dateStr} ${title}`;
-          const newNote = addNote(noteTitle, noteContent, 'yellow');
-          // We need to pin it so it shows up in the sidebar for easy Drag & Drop
-          // Use synchronous update to ensure state is ready before setNotesVersion triggers re-render
-          updateNote(newNote.id, { isPinned: true });
+          const newNote = await addNote(noteTitle, noteContent, 'yellow');
+          await updateNote(newNote.id, { isPinned: true });
 
           orphanedCount++;
         }
-      });
+      }
     }
 
     // 5. Reload
-    loadCategories();
-    loadTasks();
+    await refreshData();
     setNotesVersion(prev => prev + 1);
 
-    // 6. Ensure the schedule category is selected so user sees it immediately
+    // 6. Select category
     if (scheduleCategory && !selectedCategoryIds.includes(scheduleCategory.id)) {
       setSelectedCategoryIds(prev => [...prev, scheduleCategory!.id]);
     }
 
-    // 7. Notification (Stay on calendar view)
-    // Use setTimeout to allow UI updates to flush first
+    // 7. Notification
     setTimeout(() => {
       if (orphanedCount > 0) {
-        // Just notify user, don't switch view - pinned memos are visible in sidebar
         window.alert(`총 ${schedules.length}개의 일정이 업데이트되었습니다.\n\n⚠️ ${orphanedCount}개의 변경된 일정 데이터가 사이드바 [고정 메모]에 안전하게 백업되었습니다.\n\n사이드바에서 메모를 캘린더 일정 위로 드래그하여 병합할 수 있습니다.`);
       } else {
         window.alert(`총 ${schedules.length}개의 일정이 성공적으로 업데이트되었습니다.`);
       }
     }, 100);
-  }, [categories, selectedCategoryIds, loadCategories, loadTasks, setViewMode]);
+  }, [categories, tasks, selectedCategoryIds, addCategory, addNote, updateNote, addTask, updateTask, deleteTask, refreshData]);
 
   // Listen for 'SCHEDULE_SYNC' messages from Chrome Extension
   useEffect(() => {
@@ -591,7 +524,7 @@ export default function Home() {
 
   const selectedCategory = categories.find(c => selectedCategoryIds.includes(c.id)) || null;
 
-  if (isLoading) {
+  if (isDBLoading) {
     return (
       <div className="flex h-screen items-center justify-center">
         <div className="text-gray-500">로딩 중...</div>
@@ -832,5 +765,13 @@ export default function Home() {
         }}
       />
     </div>
+  );
+}
+
+export default function Home() {
+  return (
+    <DataProvider>
+      <HomeContent />
+    </DataProvider>
   );
 }
