@@ -866,7 +866,7 @@ export function CalendarView({
 
                                                 return (
                                                     <>
-                                                        {(isWeekPast ? scheduleTasks.slice(0, 3) : scheduleTasks).map((task) => {
+                                                        {scheduleTasks.map((task) => {
                                                             // Border Logic:
                                                             // - All Schedules: 3px left border
                                                             // - Active: Yellow
@@ -1055,11 +1055,7 @@ export function CalendarView({
                                                                 </div>
                                                             );
                                                         })}
-                                                        {isWeekPast && scheduleTasks.length > 3 && (
-                                                            <div className="text-[10px] text-gray-400 dark:text-gray-500 px-1 cursor-help" title={`${scheduleTasks.length - 3}개의 일정이 더 있습니다`}>
-                                                                + 팀 일정 {scheduleTasks.length - 3}개 더
-                                                            </div>
-                                                        )}
+
 
                                                         {/* Divider if both exist */}
                                                         {scheduleTasks.length > 0 && regularTasks.length > 0 && (
@@ -1068,7 +1064,7 @@ export function CalendarView({
 
                                                         {/* 2. Regular Tasks (Box Style) */}
                                                         {/* Past weeks: limit to 3, Current/Future weeks: show all */}
-                                                        {(isWeekPast ? regularTasks.slice(0, 3) : regularTasks).map((task) => {
+                                                        {regularTasks.map((task) => {
                                                             // Completed Task Visibility
                                                             if (task.completed && settings.completedMode === 'hidden') return null;
 
@@ -1217,11 +1213,7 @@ export function CalendarView({
                                                             );
                                                         })}
 
-                                                        {isWeekPast && regularTasks.length > 3 && (
-                                                            <div className="text-[10px] text-gray-400 dark:text-gray-500 px-1">
-                                                                +{regularTasks.length - 3}개 더
-                                                            </div>
-                                                        )}
+
                                                     </>
                                                 );
                                             })()}

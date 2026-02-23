@@ -23,6 +23,7 @@ export const parseScheduleText = (text: string, currentYear: number, currentMont
     let parsingYear = currentYear;
     let parsingMonth = currentMonth;
     let lastParsedDay = 0;
+    let monthTransitioned = false; // Stop including schedules after month transition
 
     let currentDate: Date | null = null;
     let currentTime: string | null = null;
@@ -74,15 +75,17 @@ export const parseScheduleText = (text: string, currentYear: number, currentMont
 
             // Detect month transition: if logic flows from e.g. 30, 31 -> 01, 02
             // If the new day is significantly smaller than the last parsed day (e.g. 31 -> 1),
-            // assume we've moved to the next month.
+            // the data has crossed into the next month - stop including these schedules.
             if (lastParsedDay > 20 && day < 10) {
-                parsingMonth++;
-                if (parsingMonth > 11) {
-                    parsingMonth = 0;
-                    parsingYear++;
-                }
+                monthTransitioned = true;
             }
             lastParsedDay = day;
+
+            // If month has transitioned, don't create dates for next month
+            if (monthTransitioned) {
+                currentDate = null;
+                continue;
+            }
 
             // Create date object (Month is 0-indexed)
             currentDate = new Date(parsingYear, parsingMonth, day);
@@ -159,3 +162,4 @@ export const parseScheduleText = (text: string, currentYear: number, currentMont
 
     return schedules;
 };
+

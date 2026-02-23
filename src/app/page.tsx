@@ -404,11 +404,12 @@ function HomeContent() {
         const taskYearMonth = `${taskDate.getFullYear()}-${taskDate.getMonth()}`;
 
         if (targetMonths.has(taskYearMonth)) {
-          const dateStr = format(taskDate, 'yyyy-MM-dd');
-          const key = `${dateStr}|${t.title.trim()}`;
+          // Key by title+organizer to preserve data even when date/time changes
+          const key = `${t.title.trim()}|${(t.organizer || '').trim()}`;
 
           backupMap.set(key, {
             resourceUrl: t.resourceUrl,
+            resourceUrls: t.resourceUrls,
             notes: t.notes,
             tags: t.tags,
             isPinned: t.isPinned,
@@ -420,12 +421,11 @@ function HomeContent() {
       }
     }
 
-    // 3. Add new tasks
     for (const schedule of schedules) {
       if (!scheduleCategory) continue;
 
-      const dateStr = format(schedule.date, 'yyyy-MM-dd');
-      const key = `${dateStr}|${schedule.title.trim()}`;
+      // Match by title+organizer to find backed-up data
+      const key = `${schedule.title.trim()}|${(schedule.organizer || '').trim()}`;
       const backup = backupMap.get(key);
 
       const newTask = await addTask(
@@ -443,6 +443,7 @@ function HomeContent() {
       if (backup) {
         await updateTask(newTask.id, {
           resourceUrl: backup.resourceUrl,
+          resourceUrls: backup.resourceUrls,
           notes: backup.notes,
           tags: backup.tags,
           isPinned: backup.isPinned,
