@@ -162,8 +162,8 @@ function AnimatedTaskItem({
     const selectionBorderColor = darkenColor(categoryColor, 0.25);
     const normalBorderColor = lightenColor(categoryColor, 0.4);
 
-    const handleToggle = () => {
-        toggleTaskComplete(task.id);
+    const handleToggle = async () => {
+        await toggleTaskComplete(task.id);
         onTaskChange();
     };
 
@@ -171,15 +171,15 @@ function AnimatedTaskItem({
         setShowDeleteDialog(true);
     };
 
-    const confirmDelete = () => {
-        deleteTask(task.id);
+    const confirmDelete = async () => {
+        await deleteTask(task.id);
         onTaskChange();
         setShowDeleteDialog(false);
     };
 
-    const handleTitleSave = () => {
+    const handleTitleSave = async () => {
         if (editTitle.trim()) {
-            updateTask(task.id, { title: editTitle.trim() });
+            await updateTask(task.id, { title: editTitle.trim() });
             onTaskChange();
         } else {
             setEditTitle(task.title);
@@ -203,14 +203,14 @@ function AnimatedTaskItem({
         setEditingSubtaskUrl(subtask.url || '');
     };
 
-    const handleSaveEditSubtask = () => {
+    const handleSaveEditSubtask = async () => {
         if (editingSubtaskId && task.subtasks) {
             const newSubtasks = task.subtasks.map(s =>
                 s.id === editingSubtaskId
                     ? { ...s, title: editingSubtaskTitle, url: editingSubtaskUrl || undefined }
                     : s
             );
-            updateTask(task.id, { subtasks: newSubtasks });
+            await updateTask(task.id, { subtasks: newSubtasks });
             onTaskChange();
         }
         setEditingSubtaskId(null);
@@ -257,9 +257,9 @@ function AnimatedTaskItem({
                 value={task}
                 dragListener={true}
                 dragControls={dragControls}
-                initial={{ opacity: 0, y: 20 }}
+                initial={false}
                 animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -20, transition: { duration: 0.2 } }}
+                exit={{ opacity: 0, x: -50, transition: { duration: 0.15 } }}
                 transition={{
                     type: "spring",
                     stiffness: 400,
@@ -487,8 +487,8 @@ function AnimatedTaskItem({
                         <Reorder.Group
                             axis="y"
                             values={task.subtasks}
-                            onReorder={(newOrder) => {
-                                updateTask(task.id, { subtasks: newOrder });
+                            onReorder={async (newOrder) => {
+                                await updateTask(task.id, { subtasks: newOrder });
                                 onTaskChange();
                             }}
                             className="w-full mt-2 pl-1 space-y-1"
@@ -507,11 +507,11 @@ function AnimatedTaskItem({
                                     </div>
                                     <Checkbox
                                         checked={subtask.completed}
-                                        onCheckedChange={() => {
+                                        onCheckedChange={async () => {
                                             const newSubtasks = task.subtasks!.map(s =>
                                                 s.id === subtask.id ? { ...s, completed: !s.completed } : s
                                             );
-                                            updateTask(task.id, { subtasks: newSubtasks });
+                                            await updateTask(task.id, { subtasks: newSubtasks });
                                             onTaskChange();
                                         }}
                                         className="h-3.5 w-3.5 rounded-full border-2 data-[state=checked]:!bg-gray-400 data-[state=checked]:!border-gray-400"
@@ -791,10 +791,16 @@ export function TaskList({ category, categories, tasks, onTasksChange, collectio
             );
         }
 
-        // Sort by Pinned status first
+        // Sort: Pinned first (sorted by dueDate among pinned), then by dueDate ascending
+        // Tasks without dueDate go after those with dueDate within their group
         return [...result].sort((a, b) => {
-            if (a.isPinned === b.isPinned) return 0;
-            return a.isPinned ? -1 : 1;
+            // Pinned items first
+            if (a.isPinned !== b.isPinned) return a.isPinned ? -1 : 1;
+            // Within same pin group, sort by due date ascending
+            if (a.dueDate && b.dueDate) return new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime();
+            if (a.dueDate && !b.dueDate) return -1;
+            if (!a.dueDate && b.dueDate) return 1;
+            return 0;
         });
     }, [tasks, selectedTag, searchQuery, showTodayOnly]);
 
@@ -817,10 +823,15 @@ export function TaskList({ category, categories, tasks, onTasksChange, collectio
         return date;
     }, []);
 
-    // Sync local state with props - split into with/without due date
+    // Sync local state with props - split into with/without due date, apply sort
     useEffect(() => {
         const activeTasks = filteredTasks.filter(t => !t.completed);
-        setTasksWithDueDate(activeTasks.filter(t => t.dueDate));
+        // Sort: pinned first (sorted by date among pinned), then by date ascending
+        const sorted = [...activeTasks.filter(t => t.dueDate)].sort((a, b) => {
+            if (a.isPinned !== b.isPinned) return a.isPinned ? -1 : 1;
+            return new Date(a.dueDate!).getTime() - new Date(b.dueDate!).getTime();
+        });
+        setTasksWithDueDate(sorted);
         setTasksNoDueDate(activeTasks.filter(t => !t.dueDate));
     }, [filteredTasks]);
 
@@ -994,9 +1005,9 @@ export function TaskList({ category, categories, tasks, onTasksChange, collectio
         }
     }, [isAddingTask]);
 
-    const handleAddTask = () => {
+    const handleAddTask = async () => {
         if (category && newTaskTitle.trim()) {
-            addTask(category.id, newTaskTitle.trim(), null, { source: 'manual' });
+            await addTask(category.id, newTaskTitle.trim(), null, { source: 'manual' });
             setNewTaskTitle('');
             onTasksChange();
         }
@@ -1011,13 +1022,13 @@ export function TaskList({ category, categories, tasks, onTasksChange, collectio
         }
     };
 
-    const handleConfirmDelete = () => {
+    const handleConfirmDelete = async () => {
         if (deleteTaskToConfirm) {
             // Backup and show toast
             setDeletedTaskBackup(deleteTaskToConfirm);
 
             // Delete
-            deleteTask(deleteTaskToConfirm.id);
+            await deleteTask(deleteTaskToConfirm.id);
             onTasksChange();
             setDeleteTaskToConfirm(null);
 
@@ -1057,19 +1068,17 @@ export function TaskList({ category, categories, tasks, onTasksChange, collectio
             }
         }
     };
-    const handleSortByDate = () => {
+    const handleSortByDate = async () => {
         if (category) {
-            sortTasksByDate(category.id);
+            await sortTasksByDate(category.id);
             onTasksChange();
         }
     };
 
     const handleReorderWithDueDate = (newOrder: Task[]) => {
+        // Only update local state for smooth drag UX
+        // Don't persist to DB since auto-sort by due date takes priority
         setTasksWithDueDate(newOrder);
-        if (category) {
-            const allTaskIds = [...newOrder.map(t => t.id), ...tasksNoDueDate.map(t => t.id)];
-            reorderTasks(category.id, allTaskIds);
-        }
     };
 
     const handleReorderNoDueDate = (newOrder: Task[]) => {
@@ -1080,8 +1089,8 @@ export function TaskList({ category, categories, tasks, onTasksChange, collectio
         }
     };
 
-    const handleTogglePin = (task: Task) => {
-        updateTask(task.id, { isPinned: !task.isPinned });
+    const handleTogglePin = async (task: Task) => {
+        await updateTask(task.id, { isPinned: !task.isPinned });
         onTasksChange();
     };
 

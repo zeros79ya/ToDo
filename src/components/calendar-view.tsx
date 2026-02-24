@@ -204,16 +204,7 @@ export function CalendarView({
                 setIsSearchModalOpen(true);
             }
 
-            // Month navigation shortcuts: Ctrl + ArrowLeft/ArrowRight
-            if (e.ctrlKey || e.metaKey) {
-                if (e.key === 'ArrowLeft') {
-                    e.preventDefault();
-                    onMonthChange(subMonths(currentMonth, 1));
-                } else if (e.key === 'ArrowRight') {
-                    e.preventDefault();
-                    onMonthChange(addMonths(currentMonth, 1));
-                }
-            }
+
 
             // Ctrl+M: Toggle team schedule view (standalone check)
             if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'm') {
@@ -477,13 +468,12 @@ export function CalendarView({
         }
     };
 
-    const handleDeleteConfirm = () => {
+    const handleDeleteConfirm = async () => {
         if (deleteTaskToConfirm) {
-            import('@/lib/storage').then(({ deleteTask }) => {
-                deleteTask(deleteTaskToConfirm.id);
-                onTaskDelete();
-                setDeleteTaskToConfirm(null);
-            });
+            const { deleteTask } = await import('@/lib/storage');
+            await deleteTask(deleteTaskToConfirm.id);
+            onTaskDelete();
+            setDeleteTaskToConfirm(null);
         }
     };
 

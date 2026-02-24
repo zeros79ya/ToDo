@@ -112,7 +112,7 @@ export function TeamScheduleAddModal({
         }
     }, [startTime]);
 
-    const handleSave = () => {
+    const handleSave = async () => {
         if (!title.trim() || !date || !startTime) return;
 
         const dueTimeString = endTime ? `${startTime} - ${endTime}` : startTime;
@@ -122,7 +122,7 @@ export function TeamScheduleAddModal({
         const legacyUrl = validUrls.length > 0 ? validUrls[0] : '';
 
         if (existingTask) {
-            updateTask(existingTask.id, {
+            await updateTask(existingTask.id, {
                 title: title.trim(),
                 dueDate: date.toISOString(),
                 dueTime: dueTimeString,
@@ -133,7 +133,7 @@ export function TeamScheduleAddModal({
                 isFavorite,
             });
         } else {
-            addTask(
+            await addTask(
                 teamScheduleCategoryId,
                 title.trim(),
                 date.toISOString(),

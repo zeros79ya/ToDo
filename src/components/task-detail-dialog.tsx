@@ -98,7 +98,7 @@ export function TaskDetailDialog({
         }
     }, [task]);
 
-    const handleSave = (shouldSort: boolean = false) => {
+    const handleSave = async (shouldSort: boolean = false) => {
         if (task && title.trim()) {
             const validUrls = resourceUrls.filter(u => u.trim());
             // Legacy support: keep primary URL synced
@@ -106,7 +106,7 @@ export function TaskDetailDialog({
 
             if (isNewTask) {
                 // Create new task
-                addTask(task.categoryId, title.trim(), dueDate ? dueDate.toISOString() : null, {
+                await addTask(task.categoryId, title.trim(), dueDate ? dueDate.toISOString() : null, {
                     assignee: assignee.trim(),
                     resourceUrl: legacyUrl,
                     resourceUrls: validUrls,
@@ -120,7 +120,7 @@ export function TaskDetailDialog({
                 });
             } else {
                 // Update existing task
-                updateTask(task.id, {
+                await updateTask(task.id, {
                     title: title.trim(),
                     assignee: assignee.trim(),
                     resourceUrl: legacyUrl,
@@ -137,7 +137,7 @@ export function TaskDetailDialog({
 
             // If due date was changed and Enter was pressed, auto-sort
             if (shouldSort && dueDateChanged && onSortByDate) {
-                sortTasksByDate(task.categoryId);
+                await sortTasksByDate(task.categoryId);
             }
 
             onTaskChange();
@@ -194,9 +194,9 @@ export function TaskDetailDialog({
     }, [isNotesExpanded]);
 
     // Generate time options (00:00 to 23:30, 30min intervals)
-    const handleDelete = () => {
+    const handleDelete = async () => {
         if (task && window.confirm(`"${task.title}"을(를) 삭제하시겠습니까?`)) {
-            deleteTask(task.id);
+            await deleteTask(task.id);
             onTaskChange();
             onClose();
         }

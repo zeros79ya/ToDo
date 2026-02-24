@@ -18,6 +18,7 @@ import { TeamMemberBoard } from '@/components/team-member-board';
 import { TripBoard } from '@/components/trip-board';
 
 import { ParsedSchedule, parseScheduleText } from '@/lib/schedule-parser';
+import { getAppData, saveAppData, generateId as storageGenerateId } from '@/lib/storage';
 import { Button } from '@/components/ui/button';
 import { PanelLeftClose, PanelLeft, Sun, Moon } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -59,6 +60,7 @@ function HomeContent() {
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const viewModeRef = useRef(viewMode);
+  const handleScheduleImportRef = useRef<(schedules: ParsedSchedule[]) => Promise<void>>(undefined);
 
   // Ensure default categories are selected once loaded
   useEffect(() => {
@@ -174,7 +176,7 @@ function HomeContent() {
             alert('감지된 일정이 없습니다. 텍스트 형식을 확인해주세요.');
             return;
           }
-          handleScheduleImport(result);
+          handleScheduleImportRef.current?.(result);
         }).catch(err => {
           console.error('클립보드 읽기 실패:', err);
           alert('클립보드를 읽을 수 없습니다. 브라우저 권한을 확인해주세요.');
@@ -183,12 +185,13 @@ function HomeContent() {
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [layout, taskListWidth, isSidebarVisible, showWeekends]);
+  }, [layout, taskListWidth, isSidebarVisible, showWeekends, currentMonth]);
 
   // Keep viewModeRef in sync
   useEffect(() => {
     viewModeRef.current = viewMode;
   }, [viewMode]);
+
 
   // Load layout state from localStorage on mount
   useEffect(() => {
@@ -380,33 +383,57 @@ function HomeContent() {
   };
 
   const handleScheduleImport = useCallback(async (schedules: ParsedSchedule[]) => {
+    // === BATCH IMPORT: Single DB read → modify in memory → single DB write ===
+    // This avoids per-item re-renders and makes import instant.
+
+    const data = await getAppData();
+
     // 1. Find or create "Team Schedule" category
-    let scheduleCategory = categories.find(c => c.name === '팀 일정');
+    let scheduleCategory = data.categories.find(c => c.name === '팀 일정');
     if (!scheduleCategory) {
-      scheduleCategory = await addCategory('팀 일정');
+      const maxOrder = Math.max(...data.categories.map(c => c.order), -1);
+      scheduleCategory = {
+        id: storageGenerateId(),
+        name: '팀 일정',
+        color: '#6366f1',
+        order: maxOrder + 1,
+        createdAt: new Date().toISOString(),
+      };
+      data.categories.push(scheduleCategory);
     }
 
-    // 2. Clear existing tasks in the Team Schedule category (Smart Overwrite Strategy)
+    // 2. Identify target months from parsed schedules
     const targetMonths = new Set<string>();
     schedules.forEach(s => {
       const yearMonth = `${s.date.getFullYear()}-${s.date.getMonth()}`;
       targetMonths.add(yearMonth);
     });
 
+    // 3. Backup data from existing tasks before removing them
     const backupMap = new Map<string, Partial<Task>>();
+    const tasksToKeep: typeof data.tasks = [];
 
-    const existingTasks = tasks.filter(t => t.categoryId === scheduleCategory!.id);
-    for (const t of existingTasks) {
-      if (t.source === 'manual') continue;
+    for (const t of data.tasks) {
+      if (t.categoryId !== scheduleCategory.id) {
+        tasksToKeep.push(t);
+        continue;
+      }
+
+      // Keep manual tasks
+      if (t.source === 'manual') {
+        tasksToKeep.push(t);
+        continue;
+      }
 
       if (t.dueDate) {
         const taskDate = new Date(t.dueDate);
         const taskYearMonth = `${taskDate.getFullYear()}-${taskDate.getMonth()}`;
 
         if (targetMonths.has(taskYearMonth)) {
-          // Key by title+organizer to preserve data even when date/time changes
-          const key = `${t.title.trim()}|${(t.organizer || '').trim()}`;
-
+          // Backup URL/notes/tags keyed by title+organizer+date
+          // Date is included to prevent duplicate keys when the same meeting recurs on different dates
+          const dateKey = `${taskDate.getFullYear()}-${String(taskDate.getMonth() + 1).padStart(2, '0')}-${String(taskDate.getDate()).padStart(2, '0')}`;
+          const key = `${t.title.trim()}|${(t.organizer || '').trim()}|${dateKey}`;
           backupMap.set(key, {
             resourceUrl: t.resourceUrl,
             resourceUrls: t.resourceUrls,
@@ -415,74 +442,100 @@ function HomeContent() {
             isPinned: t.isPinned,
             completed: t.completed
           });
-
-          await deleteTask(t.id);
+          // Don't push to tasksToKeep → effectively deleted
+        } else {
+          tasksToKeep.push(t); // Different month, keep it
         }
+      } else {
+        tasksToKeep.push(t);
       }
     }
+
+    // 4. Create new tasks from parsed schedules
+    // Two-pass matching strategy:
+    //   Pass 1: Exact match by title|organizer|date (handles recurring meetings)
+    //   Pass 2: Fallback match by title|organizer only (handles rescheduled meetings)
+    let maxOrder = Math.max(...tasksToKeep.filter(t => t.categoryId === scheduleCategory!.id).map(t => t.order), -1);
 
     for (const schedule of schedules) {
-      if (!scheduleCategory) continue;
+      const sDate = schedule.date;
+      const dateKey = `${sDate.getFullYear()}-${String(sDate.getMonth() + 1).padStart(2, '0')}-${String(sDate.getDate()).padStart(2, '0')}`;
+      const exactKey = `${schedule.title.trim()}|${(schedule.organizer || '').trim()}|${dateKey}`;
 
-      // Match by title+organizer to find backed-up data
-      const key = `${schedule.title.trim()}|${(schedule.organizer || '').trim()}`;
-      const backup = backupMap.get(key);
+      // Pass 1: exact match (title + organizer + date)
+      let backup = backupMap.get(exactKey);
+      let matchedKey = exactKey;
 
-      const newTask = await addTask(
-        scheduleCategory.id,
-        schedule.title,
-        schedule.date.toISOString(),
-        {
-          dueTime: schedule.time,
-          highlightLevel: schedule.highlightLevel,
-          organizer: schedule.organizer,
-          source: 'team'
+      // Pass 2: fallback match (title + organizer only, for rescheduled meetings)
+      if (!backup) {
+        const fuzzyPrefix = `${schedule.title.trim()}|${(schedule.organizer || '').trim()}|`;
+        for (const [k, v] of backupMap.entries()) {
+          if (k.startsWith(fuzzyPrefix)) {
+            backup = v;
+            matchedKey = k;
+            break;
+          }
         }
-      );
-
-      if (backup) {
-        await updateTask(newTask.id, {
-          resourceUrl: backup.resourceUrl,
-          resourceUrls: backup.resourceUrls,
-          notes: backup.notes,
-          tags: backup.tags,
-          isPinned: backup.isPinned,
-          completed: backup.completed
-        });
-        backupMap.delete(key);
       }
+
+      const newTask: Task = {
+        id: storageGenerateId(),
+        categoryId: scheduleCategory.id,
+        title: schedule.title,
+        assignee: '',
+        resourceUrl: backup?.resourceUrl || '',
+        resourceUrls: backup?.resourceUrls,
+        notes: backup?.notes || '',
+        dueDate: schedule.date.toISOString(),
+        dueTime: schedule.time,
+        tags: backup?.tags || [],
+        completed: backup?.completed || false,
+        completedAt: null,
+        isPinned: backup?.isPinned || false,
+        order: ++maxOrder,
+        createdAt: new Date().toISOString(),
+        highlightLevel: schedule.highlightLevel,
+        organizer: schedule.organizer,
+        source: 'team'
+      };
+
+      tasksToKeep.push(newTask);
+      if (backup) backupMap.delete(matchedKey);
     }
 
-    // 4. Handle Orphaned Data
+    // 5. Replace all tasks in data and save ONCE
+    data.tasks = tasksToKeep;
+    await saveAppData(data);
+
+    // 6. Handle Orphaned Data (backup data that wasn't matched to new schedules)
     let orphanedCount = 0;
     if (backupMap.size > 0) {
-      for (const [key, data] of backupMap.entries()) {
-        if (data.resourceUrl || data.notes || (data.tags && data.tags.length > 0)) {
-          const [dateStr, title] = key.split('|');
+      for (const [key, bkData] of backupMap.entries()) {
+        if (bkData.resourceUrl || bkData.notes || (bkData.tags && bkData.tags.length > 0)) {
+          const [titlePart, organizerPart] = key.split('|');
           let noteContent = '';
-          if (data.resourceUrl) noteContent += `🔗 자료: ${data.resourceUrl}\n`;
-          if (data.tags && data.tags.length > 0) noteContent += `🏷️ 태그: ${data.tags.join(', ')}\n`;
-          if (data.notes) noteContent += `📝 메모:\n${data.notes}`;
+          if (bkData.resourceUrl) noteContent += `🔗 자료: ${bkData.resourceUrl}\n`;
+          if (bkData.tags && bkData.tags.length > 0) noteContent += `🏷️ 태그: ${bkData.tags.join(', ')}\n`;
+          if (bkData.notes) noteContent += `📝 메모:\n${bkData.notes}`;
 
-          const noteTitle = `[자동백업] ${dateStr} ${title}`;
+          const noteTitle = `[자동백업] ${titlePart} ${organizerPart}`;
           const newNote = await addNote(noteTitle, noteContent, 'yellow');
           await updateNote(newNote.id, { isPinned: true });
-
           orphanedCount++;
         }
       }
     }
 
-    // 5. Reload
+    // 7. Single refresh to sync React state with DB
     await refreshData();
     setNotesVersion(prev => prev + 1);
 
-    // 6. Select category
+    // 8. Select category
     if (scheduleCategory && !selectedCategoryIds.includes(scheduleCategory.id)) {
       setSelectedCategoryIds(prev => [...prev, scheduleCategory!.id]);
     }
 
-    // 7. Notification
+    // 9. Notification
     setTimeout(() => {
       if (orphanedCount > 0) {
         window.alert(`총 ${schedules.length}개의 일정이 업데이트되었습니다.\n\n⚠️ ${orphanedCount}개의 변경된 일정 데이터가 사이드바 [고정 메모]에 안전하게 백업되었습니다.\n\n사이드바에서 메모를 캘린더 일정 위로 드래그하여 병합할 수 있습니다.`);
@@ -490,7 +543,12 @@ function HomeContent() {
         window.alert(`총 ${schedules.length}개의 일정이 성공적으로 업데이트되었습니다.`);
       }
     }, 100);
-  }, [categories, tasks, selectedCategoryIds, addCategory, addNote, updateNote, addTask, updateTask, deleteTask, refreshData]);
+  }, [selectedCategoryIds, addNote, updateNote, refreshData]);
+
+  // Keep handleScheduleImportRef in sync with latest handleScheduleImport
+  useEffect(() => {
+    handleScheduleImportRef.current = handleScheduleImport;
+  }, [handleScheduleImport]);
 
   // Listen for 'SCHEDULE_SYNC' messages from Chrome Extension
   useEffect(() => {
