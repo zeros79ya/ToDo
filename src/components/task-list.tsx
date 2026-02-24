@@ -809,8 +809,19 @@ export function TaskList({ category, categories, tasks, onTasksChange, collectio
         const cat = categories.find(c => c.id === task.categoryId);
         return cat?.color || '#3b82f6';
     };
-    const [tasksWithDueDate, setTasksWithDueDate] = useState<Task[]>([]);
-    const [tasksNoDueDate, setTasksNoDueDate] = useState<Task[]>([]);
+    // Compute sorted task lists directly as memo (no useState+useEffect double-render)
+    const tasksWithDueDate = React.useMemo(() => {
+        const activeTasks = filteredTasks.filter(t => !t.completed && t.dueDate);
+        return [...activeTasks].sort((a, b) => {
+            if (a.isPinned !== b.isPinned) return a.isPinned ? -1 : 1;
+            return new Date(a.dueDate!).getTime() - new Date(b.dueDate!).getTime();
+        });
+    }, [filteredTasks]);
+
+    const tasksNoDueDate = React.useMemo(() => {
+        return filteredTasks.filter(t => !t.completed && !t.dueDate);
+    }, [filteredTasks]);
+
     const [showArchive, setShowArchive] = useState(false);
     const [archiveSearch, setArchiveSearch] = useState('');
     const inputRef = useRef<HTMLInputElement>(null);
@@ -822,18 +833,6 @@ export function TaskList({ category, categories, tasks, onTasksChange, collectio
         date.setHours(0, 0, 0, 0);
         return date;
     }, []);
-
-    // Sync local state with props - split into with/without due date, apply sort
-    useEffect(() => {
-        const activeTasks = filteredTasks.filter(t => !t.completed);
-        // Sort: pinned first (sorted by date among pinned), then by date ascending
-        const sorted = [...activeTasks.filter(t => t.dueDate)].sort((a, b) => {
-            if (a.isPinned !== b.isPinned) return a.isPinned ? -1 : 1;
-            return new Date(a.dueDate!).getTime() - new Date(b.dueDate!).getTime();
-        });
-        setTasksWithDueDate(sorted);
-        setTasksNoDueDate(activeTasks.filter(t => !t.dueDate));
-    }, [filteredTasks]);
 
     // Split completed tasks into recent (7 days) and archived
     const recentCompletedTasks = React.useMemo(() => {
@@ -1075,18 +1074,12 @@ export function TaskList({ category, categories, tasks, onTasksChange, collectio
         }
     };
 
-    const handleReorderWithDueDate = (newOrder: Task[]) => {
-        // Only update local state for smooth drag UX
-        // Don't persist to DB since auto-sort by due date takes priority
-        setTasksWithDueDate(newOrder);
+    const handleReorderWithDueDate = (_newOrder: Task[]) => {
+        // No-op: auto-sort by due date takes priority (tasksWithDueDate is useMemo)
     };
 
-    const handleReorderNoDueDate = (newOrder: Task[]) => {
-        setTasksNoDueDate(newOrder);
-        if (category) {
-            const allTaskIds = [...tasksWithDueDate.map(t => t.id), ...newOrder.map(t => t.id)];
-            reorderTasks(category.id, allTaskIds);
-        }
+    const handleReorderNoDueDate = (_newOrder: Task[]) => {
+        // No-op: tasksNoDueDate is useMemo, order is derived from filteredTasks
     };
 
     const handleTogglePin = async (task: Task) => {
