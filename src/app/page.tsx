@@ -388,6 +388,22 @@ function HomeContent() {
 
     const data = await getAppData();
 
+    // 0. Cleanup: deduplicate '팀 일정' categories (fix for encoding corruption / stale DB data)
+    const teamCategories = data.categories.filter(c => c.name === '팀 일정');
+    if (teamCategories.length > 1) {
+      const primary = teamCategories[0];
+      const duplicateIds = teamCategories.slice(1).map(c => c.id);
+      // Move tasks from duplicate categories to primary
+      data.tasks.forEach(t => {
+        if (duplicateIds.includes(t.categoryId)) {
+          t.categoryId = primary.id;
+        }
+      });
+      // Remove duplicate categories
+      data.categories = data.categories.filter(c => !duplicateIds.includes(c.id));
+      console.log(`[Import] 중복 '팀 일정' 카테고리 ${duplicateIds.length}개 정리됨`);
+    }
+
     // 1. Find or create "Team Schedule" category
     let scheduleCategory = data.categories.find(c => c.name === '팀 일정');
     if (!scheduleCategory) {
