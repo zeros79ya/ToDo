@@ -67,6 +67,7 @@ function AnimatedTaskItem({
     taskClickMode?: 'single' | 'double';
 }) {
     const dragControls = useDragControls();
+    const isDragging = useRef(false);
     const [isEditing, setIsEditing] = useState(false);
     const [editTitle, setEditTitle] = useState(task.title);
 
@@ -257,6 +258,8 @@ function AnimatedTaskItem({
                 value={task}
                 dragListener={true}
                 dragControls={dragControls}
+                onDragStart={() => { isDragging.current = true; }}
+                onDragEnd={() => { setTimeout(() => { isDragging.current = false; }, 100); }}
                 initial={false}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, x: -50, transition: { duration: 0.15 } }}
@@ -290,6 +293,8 @@ function AnimatedTaskItem({
                     }
                 }}
                 onClick={async (e) => {
+                    if (isDragging.current) return;
+
                     // Ctrl+Click: paste URL from clipboard
                     if (e.ctrlKey || e.metaKey) {
                         const handled = await handleCtrlClickUrlPaste();
@@ -809,17 +814,35 @@ export function TaskList({ category, categories, tasks, onTasksChange, collectio
         const cat = categories.find(c => c.id === task.categoryId);
         return cat?.color || '#3b82f6';
     };
-    // Compute sorted task lists directly as memo (no useState+useEffect double-render)
-    const tasksWithDueDate = React.useMemo(() => {
-        const activeTasks = filteredTasks.filter(t => !t.completed && t.dueDate);
-        return [...activeTasks].sort((a, b) => {
-            if (a.isPinned !== b.isPinned) return a.isPinned ? -1 : 1;
-            return new Date(a.dueDate!).getTime() - new Date(b.dueDate!).getTime();
-        });
-    }, [filteredTasks]);
+    const [tasksWithDueDate, setTasksWithDueDate] = useState<Task[]>([]);
+    const [tasksNoDueDate, setTasksNoDueDate] = useState<Task[]>([]);
+    const isUserDragging = useRef(false);
 
-    const tasksNoDueDate = React.useMemo(() => {
-        return filteredTasks.filter(t => !t.completed && !t.dueDate);
+    // Sync local state with props - apply sort
+    useEffect(() => {
+        const activeTasks = filteredTasks.filter(t => !t.completed);
+
+        // Auto-sort algorithm:
+        // 1. Pinned status
+        // 2. Due Date
+        // 3. DB Order (to preserve manual drag-and-drop within the same date group)
+        const sorted = [...activeTasks.filter(t => t.dueDate)].sort((a, b) => {
+            if (a.isPinned !== b.isPinned) return a.isPinned ? -1 : 1;
+
+            const timeA = new Date(a.dueDate!).getTime();
+            const timeB = new Date(b.dueDate!).getTime();
+            if (timeA !== timeB) return timeA - timeB;
+
+            return (a.order || 0) - (b.order || 0);
+        });
+
+        const sortedNoDate = [...activeTasks.filter(t => !t.dueDate)].sort((a, b) => {
+            if (a.isPinned !== b.isPinned) return a.isPinned ? -1 : 1;
+            return (a.order || 0) - (b.order || 0);
+        });
+
+        setTasksWithDueDate(sorted);
+        setTasksNoDueDate(sortedNoDate);
     }, [filteredTasks]);
 
     const [showArchive, setShowArchive] = useState(false);
@@ -1074,12 +1097,21 @@ export function TaskList({ category, categories, tasks, onTasksChange, collectio
         }
     };
 
-    const handleReorderWithDueDate = (_newOrder: Task[]) => {
-        // No-op: auto-sort by due date takes priority (tasksWithDueDate is useMemo)
+    const handleReorderWithDueDate = (newOrder: Task[]) => {
+        setTasksWithDueDate(newOrder);
+        // Only persist to DB when user is actually dragging (not when Reorder.Group auto-rearranges)
+        if (isUserDragging.current && category) {
+            const allTaskIds = [...newOrder.map(t => t.id), ...tasksNoDueDate.map(t => t.id)];
+            reorderTasks(category.id, allTaskIds);
+        }
     };
 
-    const handleReorderNoDueDate = (_newOrder: Task[]) => {
-        // No-op: tasksNoDueDate is useMemo, order is derived from filteredTasks
+    const handleReorderNoDueDate = (newOrder: Task[]) => {
+        setTasksNoDueDate(newOrder);
+        if (isUserDragging.current && category) {
+            const allTaskIds = [...tasksWithDueDate.map(t => t.id), ...newOrder.map(t => t.id)];
+            reorderTasks(category.id, allTaskIds);
+        }
     };
 
     const handleTogglePin = async (task: Task) => {
@@ -1215,6 +1247,8 @@ export function TaskList({ category, categories, tasks, onTasksChange, collectio
                             onReorder={handleReorderWithDueDate}
                             className="space-y-2"
                             layoutScroll
+                            onPointerDown={() => { isUserDragging.current = true; }}
+                            onPointerUp={() => { setTimeout(() => { isUserDragging.current = false; }, 200); }}
                         >
                             <AnimatePresence>
                                 {tasksWithDueDate.map((task: Task) => (
@@ -1271,6 +1305,8 @@ export function TaskList({ category, categories, tasks, onTasksChange, collectio
                                                 onReorder={handleReorderNoDueDate}
                                                 className="space-y-2"
                                                 layoutScroll
+                                                onPointerDown={() => { isUserDragging.current = true; }}
+                                                onPointerUp={() => { setTimeout(() => { isUserDragging.current = false; }, 200); }}
                                             >
                                                 <AnimatePresence>
                                                     {tasksNoDueDate.map((task: Task) => (

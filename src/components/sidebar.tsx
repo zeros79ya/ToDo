@@ -377,30 +377,26 @@ export function Sidebar({
                                     </TooltipContent>
                                 </Tooltip>
                             </div>
-                            <DropdownMenu>
-                                <DropdownMenuTrigger asChild onClick={(e) => e.stopPropagation()}>
-                                    <Button
-                                        variant="ghost"
-                                        size="sm"
-                                        className="h-8 w-8 p-0"
-                                    >
-                                        <MoreVertical className="h-4 w-4" />
-                                    </Button>
-                                </DropdownMenuTrigger>
-                                <DropdownMenuContent align="end">
-                                    <DropdownMenuItem onClick={() => openEditDialog(category)}>
-                                        <Edit2 className="w-4 h-4 mr-2" />
-                                        이름 변경
-                                    </DropdownMenuItem>
-                                    <DropdownMenuItem
-                                        onClick={() => handleDeleteCategory(category)}
-                                        className="text-red-600"
-                                    >
-                                        <Trash2 className="w-4 h-4 mr-2" />
-                                        삭제
-                                    </DropdownMenuItem>
-                                </DropdownMenuContent>
-                            </DropdownMenu>
+                            <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                                <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-6 w-6 p-0 text-gray-400 hover:text-blue-600 hover:bg-blue-50"
+                                    onClick={(e) => { e.stopPropagation(); openEditDialog(category); }}
+                                    title="이름/색상 수정"
+                                >
+                                    <Edit2 className="h-3.5 w-3.5" />
+                                </Button>
+                                <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-6 w-6 p-0 text-gray-400 hover:text-red-600 hover:bg-red-50"
+                                    onClick={(e) => { e.stopPropagation(); handleDeleteCategory(category); }}
+                                    title="삭제"
+                                >
+                                    <Trash2 className="h-3.5 w-3.5" />
+                                </Button>
+                            </div>
                         </div>
                     ))}
                 </div>
