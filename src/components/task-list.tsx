@@ -796,15 +796,18 @@ export function TaskList({ category, categories, tasks, onTasksChange, collectio
             );
         }
 
-        // Sort: Pinned first (sorted by dueDate among pinned), then by dueDate ascending
-        // Tasks without dueDate go after those with dueDate within their group
+        // Sort: by dueDate ascending first, then pinned within same date
+        // Tasks without dueDate go after those with dueDate
         return [...result].sort((a, b) => {
-            // Pinned items first
-            if (a.isPinned !== b.isPinned) return a.isPinned ? -1 : 1;
-            // Within same pin group, sort by due date ascending
-            if (a.dueDate && b.dueDate) return new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime();
+            // Due date first: tasks with due dates come before those without
+            if (a.dueDate && b.dueDate) {
+                const timeDiff = new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime();
+                if (timeDiff !== 0) return timeDiff;
+            }
             if (a.dueDate && !b.dueDate) return -1;
             if (!a.dueDate && b.dueDate) return 1;
+            // Secondary: Pinned items first (within same date group)
+            if (a.isPinned !== b.isPinned) return a.isPinned ? -1 : 1;
             return 0;
         });
     }, [tasks, selectedTag, searchQuery, showTodayOnly]);
@@ -814,36 +817,45 @@ export function TaskList({ category, categories, tasks, onTasksChange, collectio
         const cat = categories.find(c => c.id === task.categoryId);
         return cat?.color || '#3b82f6';
     };
-    const [tasksWithDueDate, setTasksWithDueDate] = useState<Task[]>([]);
-    const [tasksNoDueDate, setTasksNoDueDate] = useState<Task[]>([]);
-    const isUserDragging = useRef(false);
 
-    // Sync local state with props - apply sort
-    useEffect(() => {
-        const activeTasks = filteredTasks.filter(t => !t.completed);
-
-        // Auto-sort algorithm:
-        // 1. Pinned status
-        // 2. Due Date
-        // 3. DB Order (to preserve manual drag-and-drop within the same date group)
-        const sorted = [...activeTasks.filter(t => t.dueDate)].sort((a, b) => {
-            if (a.isPinned !== b.isPinned) return a.isPinned ? -1 : 1;
-
+    // Compute sorted task lists via useMemo (authoritative sort order)
+    const sortedWithDueDate = React.useMemo(() => {
+        const activeTasks = filteredTasks.filter(t => !t.completed && t.dueDate);
+        return [...activeTasks].sort((a, b) => {
+            // Primary: Due Date ascending
             const timeA = new Date(a.dueDate!).getTime();
             const timeB = new Date(b.dueDate!).getTime();
             if (timeA !== timeB) return timeA - timeB;
-
+            // Secondary: Pinned first (within same date)
+            if (a.isPinned !== b.isPinned) return a.isPinned ? -1 : 1;
+            // Tertiary: DB order (for DnD within same date)
             return (a.order || 0) - (b.order || 0);
         });
+    }, [filteredTasks]);
 
-        const sortedNoDate = [...activeTasks.filter(t => !t.dueDate)].sort((a, b) => {
+    const sortedNoDueDate = React.useMemo(() => {
+        const activeTasks = filteredTasks.filter(t => !t.completed && !t.dueDate);
+        return [...activeTasks].sort((a, b) => {
             if (a.isPinned !== b.isPinned) return a.isPinned ? -1 : 1;
             return (a.order || 0) - (b.order || 0);
         });
-
-        setTasksWithDueDate(sorted);
-        setTasksNoDueDate(sortedNoDate);
     }, [filteredTasks]);
+
+    // Drag override: temporary reorder state during user drag (null = use sorted memo)
+    const [dragOverrideWithDate, setDragOverrideWithDate] = useState<Task[] | null>(null);
+    const [dragOverrideNoDate, setDragOverrideNoDate] = useState<Task[] | null>(null);
+
+    // Clear drag overrides when source data changes
+    useEffect(() => {
+        setDragOverrideWithDate(null);
+    }, [sortedWithDueDate]);
+    useEffect(() => {
+        setDragOverrideNoDate(null);
+    }, [sortedNoDueDate]);
+
+    // Effective display order: drag override takes priority over sorted memo
+    const tasksWithDueDate = dragOverrideWithDate ?? sortedWithDueDate;
+    const tasksNoDueDate = dragOverrideNoDate ?? sortedNoDueDate;
 
     const [showArchive, setShowArchive] = useState(false);
     const [archiveSearch, setArchiveSearch] = useState('');
@@ -1094,21 +1106,23 @@ export function TaskList({ category, categories, tasks, onTasksChange, collectio
         if (category) {
             await sortTasksByDate(category.id);
             onTasksChange();
+            // Clear any drag overrides so the fresh sorted data from DB is used
+            setDragOverrideWithDate(null);
+            setDragOverrideNoDate(null);
         }
     };
 
     const handleReorderWithDueDate = (newOrder: Task[]) => {
-        setTasksWithDueDate(newOrder);
-        // Only persist to DB when user is actually dragging (not when Reorder.Group auto-rearranges)
-        if (isUserDragging.current && category) {
+        setDragOverrideWithDate(newOrder);
+        if (category) {
             const allTaskIds = [...newOrder.map(t => t.id), ...tasksNoDueDate.map(t => t.id)];
             reorderTasks(category.id, allTaskIds);
         }
     };
 
     const handleReorderNoDueDate = (newOrder: Task[]) => {
-        setTasksNoDueDate(newOrder);
-        if (isUserDragging.current && category) {
+        setDragOverrideNoDate(newOrder);
+        if (category) {
             const allTaskIds = [...tasksWithDueDate.map(t => t.id), ...newOrder.map(t => t.id)];
             reorderTasks(category.id, allTaskIds);
         }
@@ -1242,13 +1256,12 @@ export function TaskList({ category, categories, tasks, onTasksChange, collectio
 
                         {/* Tasks WITH Due Date */}
                         <Reorder.Group
+                            key={`duedate-${sortedWithDueDate.map(t => t.id).join(',')}`}
                             axis="y"
                             values={tasksWithDueDate}
                             onReorder={handleReorderWithDueDate}
                             className="space-y-2"
                             layoutScroll
-                            onPointerDown={() => { isUserDragging.current = true; }}
-                            onPointerUp={() => { setTimeout(() => { isUserDragging.current = false; }, 200); }}
                         >
                             <AnimatePresence>
                                 {tasksWithDueDate.map((task: Task) => (
@@ -1300,13 +1313,12 @@ export function TaskList({ category, categories, tasks, onTasksChange, collectio
                                             exit={{ opacity: 0, height: 0 }}
                                         >
                                             <Reorder.Group
+                                                key={`nodate-${sortedNoDueDate.map(t => t.id).join(',')}`}
                                                 axis="y"
                                                 values={tasksNoDueDate}
                                                 onReorder={handleReorderNoDueDate}
                                                 className="space-y-2"
                                                 layoutScroll
-                                                onPointerDown={() => { isUserDragging.current = true; }}
-                                                onPointerUp={() => { setTimeout(() => { isUserDragging.current = false; }, 200); }}
                                             >
                                                 <AnimatePresence>
                                                     {tasksNoDueDate.map((task: Task) => (

@@ -586,7 +586,7 @@ export function CalendarView({
         // Changed order to start with Sunday
         const days = ['일', '월', '화', '수', '목', '금', '토'];
         return (
-            <div className={`grid ${showWeekends ? 'grid-cols-[32px_minmax(0,0.5fr)_repeat(6,minmax(0,1fr))]' : 'grid-cols-[32px_repeat(6,minmax(0,1fr))]'} border-b border-gray-200 dark:border-gray-700`} style={{ scrollbarGutter: 'stable' }}>
+            <div className={`grid ${showWeekends ? 'grid-cols-[32px_minmax(0,0.5fr)_repeat(6,minmax(0,1fr))]' : 'grid-cols-[32px_repeat(6,minmax(0,1fr))]'} border-b border-gray-200 dark:border-gray-700 sticky top-0 z-10 bg-white dark:bg-gray-900`}>
                 <div className="w-8 border-r border-gray-200 dark:border-gray-700"></div> {/* Week number column header */}
                 {days.map((day, i) => {
                     // i=0 (Sun), i=6 (Sat)
@@ -665,7 +665,8 @@ export function CalendarView({
         });
 
         return (
-            <div className="flex-1 flex flex-col overflow-y-auto bg-white dark:bg-gray-900 select-none" style={{ scrollbarGutter: 'stable' }}>
+            <div className="flex-1 flex flex-col overflow-y-auto bg-white dark:bg-gray-900 select-none">
+                {renderDays()}
                 {weeks.map((weekDays, weekIndex) => {
                     const firstDayOfWeek = weekDays[0];
                     const weekNum = getWeekNumber(firstDayOfWeek);
@@ -1221,7 +1222,6 @@ export function CalendarView({
     return (
         <div className="flex flex-col h-full bg-white dark:bg-gray-900 border-l border-gray-200 dark:border-gray-700">
             {renderHeader()}
-            {renderDays()}
             {renderCells()}
 
             <TeamScheduleAddModal
