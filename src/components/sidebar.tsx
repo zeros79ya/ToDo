@@ -360,15 +360,16 @@ export function Sidebar({
                                 : 'hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-700 dark:text-gray-300'
                                 }`}
                             onClick={(e) => onSelectCategory(category.id, e.ctrlKey || e.metaKey)}
+                            onDoubleClick={(e) => { e.stopPropagation(); openEditDialog(category); }}
                         >
-                            <div className="flex items-center gap-2">
+                            <div className="flex items-center gap-2 min-w-0 flex-1">
                                 <div
                                     className="w-3 h-3 rounded-full flex-shrink-0"
                                     style={{ backgroundColor: category.color || '#3b82f6' }}
                                 />
                                 <Tooltip>
                                     <TooltipTrigger asChild>
-                                        <span className="text-sm font-medium truncate max-w-[200px] cursor-default">
+                                        <span className="text-sm font-medium truncate cursor-default">
                                             {category.name}
                                         </span>
                                     </TooltipTrigger>
@@ -377,7 +378,7 @@ export function Sidebar({
                                     </TooltipContent>
                                 </Tooltip>
                             </div>
-                            <div className="flex items-center gap-0.5">
+                            <div className="flex items-center gap-0.5 flex-shrink-0 ml-1">
                                 <Button
                                     variant="ghost"
                                     size="sm"
@@ -712,11 +713,23 @@ export function Sidebar({
                             </div>
                         </div>
                     </div>
-                    <DialogFooter>
-                        <Button variant="outline" onClick={() => setIsEditDialogOpen(false)}>
-                            취소
+                    <DialogFooter className="flex justify-between w-full sm:justify-between items-center sm:space-x-0">
+                        <Button
+                            variant="destructive"
+                            onClick={() => {
+                                setIsEditDialogOpen(false);
+                                if (editingCategory) handleDeleteCategory(editingCategory);
+                            }}
+                            className="bg-red-600 hover:bg-red-700 mr-auto"
+                        >
+                            삭제
                         </Button>
-                        <Button onClick={handleEditCategory}>저장</Button>
+                        <div className="flex gap-2">
+                            <Button variant="outline" onClick={() => setIsEditDialogOpen(false)}>
+                                취소
+                            </Button>
+                            <Button onClick={handleEditCategory}>저장</Button>
+                        </div>
                     </DialogFooter>
                 </DialogContent>
             </Dialog >
